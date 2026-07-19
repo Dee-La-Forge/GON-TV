@@ -399,8 +399,15 @@
       sw.onclick = (e) => {
         e.stopPropagation();
         cinema = !cinema;
-        if (cinema) { gon.mount.appendChild(vid); vid.classList.add("gonCinema"); }
-        else { vid.classList.remove("gonCinema"); col.appendChild(vid); }
+        if (cinema) {
+          gon.mount.appendChild(vid); vid.classList.add("gonCinema");
+          // en grand ecran, les panneaux de droite sont MASQUES : le film
+          // prend toute la largeur, retour a l'identique au re-clic
+          col.style.display = "none";
+        } else {
+          vid.classList.remove("gonCinema"); col.appendChild(vid);
+          col.style.display = "";
+        }
       };
     })();
 
