@@ -418,6 +418,14 @@
     radarCv.onclick = () => {
       muted = !muted;
       try { localStorage.setItem(SND_KEY, muted ? "0" : "1"); } catch (_) {}
+      // le clic est un GESTE utilisateur : on arme/reveille le contexte audio
+      // ici meme, et on joue un bip de confirmation — tu entends le son du
+      // sonar immediatement quand tu le reactives.
+      armAudio();
+      if (!muted && actx) {
+        if (actx.state === "suspended") actx.resume().then(() => sonarTick(false)).catch(() => {});
+        else sonarTick(false);
+      }
     };
     document.addEventListener("pointerdown", armAudio, { once: true });
 
@@ -440,6 +448,8 @@
     window.__gonWhale = {
       state: () => ({ symbol: curSymbol, socket: ws ? ws.readyState : null,
         lastMsgAgeMs: lastMsgAt ? Date.now() - lastMsgAt : null, visible, muted,
+        audio: { armed, ctx: actx ? actx.state : null, blips: blips.length,
+          lastEchoAgoMs: lastEchoAt ? Math.round(performance.now() - lastEchoAt) : null },
         ready: SYMS.filter((s) => stats[s].ready).length,
         samples: Object.fromEntries(SYMS.map((s) => [s, stats[s].arr.length])),
         thr: curSymbol && stats[curSymbol]
