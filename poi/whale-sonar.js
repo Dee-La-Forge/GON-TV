@@ -178,12 +178,6 @@
       r: dim ? 1.6 : Math.min(6, 2 + Math.log10(Math.max(1, usd / 1e5)) * 2.2),
       ang: Math.random() * Math.PI * 2, dist: 44 + Math.random() * 18 });
     if (blips.length > 90) blips.shift();
-    // SYNCHRO oeil/oreille : chaque point sonne A SA NAISSANCE — bip franc
-    // pour ton symbole, tick doux pour l'ambiance (deja rate-limitee amont).
-    if (silent) return;
-    const bNow = performance.now();
-    if (!dim && bNow - lastEchoAt > 150) { lastEchoAt = bNow; sonarTick(false); }
-    else if (dim) sonarTick(true);
   }
 
   function journal(side, usd, sym, big) {
@@ -267,15 +261,19 @@
     for (const rr of [54, R_MAX]) {
       radarCx.beginPath(); radarCx.arc(cxr, cyr, rr, 0, Math.PI * 2); radarCx.stroke();
     }
-    // le faisceau ILLUMINE les contacts qu'il croise (visuel seulement —
-    // le son, lui, part a la naissance du blip : synchro directe)
+    // ECHO style radar (prefere par Meddy) : quand le faisceau PASSE sur un
+    // contact, le point FLASHE et le bip part au meme instant — flash et son
+    // sont le meme evenement, synchro par construction. Contact vif = bip
+    // franc, ambiance = tick doux (300 ms mini entre echos).
     const TAU = Math.PI * 2, prevA = sweepA % TAU;
     sweepA += 0.014;
     const curA = sweepA % TAU, nowMs = performance.now();
     for (const b of blips) {
       const a = ((b.ang % TAU) + TAU) % TAU;
       const crossed = prevA <= curA ? (a > prevA && a <= curA) : (a > prevA || a <= curA);
-      if (crossed) b.lit = nowMs;
+      if (!crossed) continue;
+      b.lit = nowMs;
+      if (nowMs - lastEchoAt > 300) { lastEchoAt = nowMs; sonarTick(b.dim); }
     }
     for (let s = 0; s < 6; s++) {
       const a = sweepA - s * 0.06;
