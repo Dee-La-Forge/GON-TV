@@ -367,6 +367,8 @@
         color:#d9b64d; border:1px solid #232635; font-size:12px; line-height:1;
         padding:2px 7px; cursor:pointer; pointer-events:auto; }
       #gonVidSwap:hover { border-color:#d9b64d; }
+      /* en plein ecran, le bouton de retour passe EN HAUT A GAUCHE */
+      #gonLiqVideo.gonCinema #gonVidSwap { top:10px; left:10px; bottom:auto; font-size:14px; }
     `;
     document.head.appendChild(css);
 

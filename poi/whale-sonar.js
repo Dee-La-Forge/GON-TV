@@ -171,13 +171,19 @@
   /* ---------- visuels ---------- */
   const shown = () => visible && cv && cv.offsetParent !== null;
 
-  function addBlip(side, usd, dim) {
+  function addBlip(side, usd, dim, silent) {
     if (!shown()) return;
     // orbite 44-58 : hors du logo (42), sous l'anneau externe (60)
     blips.push({ side, dim, born: performance.now(),
       r: dim ? 1.6 : Math.min(6, 2 + Math.log10(Math.max(1, usd / 1e5)) * 2.2),
       ang: Math.random() * Math.PI * 2, dist: 44 + Math.random() * 18 });
     if (blips.length > 90) blips.shift();
+    // SYNCHRO oeil/oreille : chaque point sonne A SA NAISSANCE — bip franc
+    // pour ton symbole, tick doux pour l'ambiance (deja rate-limitee amont).
+    if (silent) return;
+    const bNow = performance.now();
+    if (!dim && bNow - lastEchoAt > 150) { lastEchoAt = bNow; sonarTick(false); }
+    else if (dim) sonarTick(true);
   }
 
   function journal(side, usd, sym, big) {
