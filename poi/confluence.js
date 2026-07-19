@@ -18,7 +18,7 @@
 
   const BUY = "#2f8bff", SELL = "#ff2d5e", GOLD = "#d9b64d";
   const ON_KEY = "gon.confl.on";
-  const PANEL_W = 210;
+  const PANEL_W = 225;
   const WALL_MIN_USD = 1.5e6;          // plancher absolu d'un mur
   const WALL_FACTOR = 6;               // ... et >= 6x la mediane du carnet
   const STALL_MS = 20000;
@@ -350,7 +350,11 @@
          pleine largeur en dessous des deux panneaux */
       #gonRightCol { display:flex; flex-direction:column; min-height:0; }
       #gonRightRow { display:flex; flex:1 1 auto; min-height:0; }
-      #gonRightCol > #gonLiqVideo { margin:0 8px 8px 0; width:330px; align-self:flex-end; border-radius:6px; overflow:hidden;
+      /* equilibre de la colonne : deux tours de largeur EGALE, et la video
+         en socle pleine largeur, format bandeau cinema (21:9, cover) */
+      #gonRightRow > #gonLiqPanel { flex:0 0 225px; }
+      #gonRightCol > #gonLiqVideo { margin:0 8px 8px 0; align-self:stretch; width:auto;
+        aspect-ratio:21/9; border-radius:6px; overflow:hidden;
         border:1px solid rgba(217,182,77,.14); }
     `;
     document.head.appendChild(css);
