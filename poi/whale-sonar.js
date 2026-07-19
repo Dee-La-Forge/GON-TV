@@ -33,7 +33,7 @@
   let visible = true, muted = false, curSymbol = "", rafId = 0;
   let cv, cx, radarCv, radarCx, journalEl, btn;
   const waves = [], scars = [], surges = [], blips = [];
-  let sweepA = 0, lastDimBlipAt = 0, lastThrSaveAt = 0, lastEchoAt = 0;
+  let sweepA = 0, lastDimBlipAt = 0, lastThrSaveAt = 0, lastEchoAt = 0, lastAmbEchoAt = 0;
 
   /* ---------- statistiques par symbole ---------- */
   const stats = {};
@@ -89,7 +89,8 @@
       // de choc reste reservee aux bursts.
       if (n >= st.thrHi && shown())
         waves.push({ tSec: T / 1000, price, side, born: performance.now(), mini: true });
-    } else if (now - lastDimBlipAt > 400) {
+    } else if (now - lastDimBlipAt > 1200) {
+      // meme cadence que le tick sonore doux : 1 point d'ambiance = 1 son
       lastDimBlipAt = now; addBlip(side, n, true);
     }
     st.bigs.push({ t: now, side });
@@ -306,15 +307,18 @@
     if (armed) return; armed = true;
     try { actx = new AudioContext(); } catch (_) {}
   }
-  // ping ambiant du balayage : bref, aigu, tres doux (sous-marin)
-  function sonarTick() {
+  // echo de naissance d'un contact. soft = blip d'ambiance (tres doux,
+  // plus grave). Contexte suspendu : on resume et on SAUTE ce son — un
+  // bip en retard est pire qu'un bip absent pour la synchro percue.
+  function sonarTick(soft) {
     if (muted || !actx || !shown()) return;
-    if (actx.state === "suspended") { actx.resume().catch(() => {}); }
+    if (actx.state === "suspended") { actx.resume().catch(() => {}); return; }
     const o = actx.createOscillator(), g = actx.createGain();
-    o.type = "sine"; o.frequency.setValueAtTime(920, actx.currentTime);
-    o.frequency.exponentialRampToValueAtTime(640, actx.currentTime + 0.45);
-    g.gain.setValueAtTime(0.16, actx.currentTime);
-    g.gain.exponentialRampToValueAtTime(0.0004, actx.currentTime + 0.5);
+    const f0 = soft ? 560 : 920, f1 = soft ? 420 : 640;
+    o.type = "sine"; o.frequency.setValueAtTime(f0, actx.currentTime);
+    o.frequency.exponentialRampToValueAtTime(f1, actx.currentTime + (soft ? 0.25 : 0.45));
+    g.gain.setValueAtTime(soft ? 0.045 : 0.16, actx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.0004, actx.currentTime + (soft ? 0.3 : 0.5));
     o.connect(g).connect(actx.destination); o.start(); o.stop(actx.currentTime + 0.55);
   }
 
