@@ -2526,6 +2526,21 @@ window.__gon = {
   invalidate,
 };
 
+/* G-ON : DEFILEMENT AUTOMATIQUE — si on a scrolle dans le passe, le chart
+   revient tout seul au direct apres 30 s sans interaction (souhait Meddy).
+   Jamais pendant un replay ni un chargement ; toute interaction re-arme. */
+let gonLastTouch = Date.now();
+['pointerdown', 'wheel', 'touchstart', 'keydown'].forEach(ev =>
+  $('chartwrap').addEventListener(ev, () => { gonLastTouch = Date.now(); }, { passive: true }));
+setInterval(() => {
+  if (replay || loading || Date.now() - gonLastTouch < 30000) return;
+  try {
+    const n = dataNow().length; if (!n) return;
+    const lr = ts().getVisibleLogicalRange();
+    if (lr && lr.to < n - 1) snapToLive();   // derniere bougie hors vue -> retour au direct
+  } catch {}
+}, 2000);
+
 load();
 </script>
 <!-- G-ON : moteur POI (modules purs testes) + feature live + rendu -->
