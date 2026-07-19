@@ -127,7 +127,7 @@
       }
     }
     addBlip(side, usd * 4, false, true);   // silent : le burst a son propre ping grave
-    journal(side, true);
+    journal(side, usd, true);
   }
 
   /* ---------- amorcage REST des seuils (demarrage a froid) ---------- */
@@ -358,7 +358,7 @@
     const now = performance.now();
     drawSurges(now, plotW);
     drawWaves(now, plotW);
-    drawRadar(now);
+    if (radarShown()) drawRadar(now);
   }
 
   function applyVisible() {
