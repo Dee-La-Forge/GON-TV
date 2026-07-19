@@ -357,6 +357,16 @@
       #gonRightCol > #gonLiqVideo { margin:0 8px 8px 0; align-self:flex-start; width:338px;
         aspect-ratio:16/9; border-radius:6px; overflow:hidden;
         border:1px solid rgba(217,182,77,.14); }
+      /* mode CINEMA : la video prend la place du chart (le chart continue
+         de tourner dessous), re-clic pour revenir */
+      #gonLiqVideo.gonCinema { position:absolute; inset:0; z-index:8; width:100% !important;
+        height:100%; aspect-ratio:auto; margin:0 !important; border:none; border-radius:0;
+        background:#000; }
+      #gonLiqVideo.gonCinema video { object-fit:contain; }
+      #gonVidSwap { position:absolute; left:8px; bottom:9px; z-index:9; background:rgba(10,10,8,.6);
+        color:#d9b64d; border:1px solid #232635; font-size:12px; line-height:1;
+        padding:2px 7px; cursor:pointer; pointer-events:auto; }
+      #gonVidSwap:hover { border-color:#d9b64d; }
     `;
     document.head.appendChild(css);
 
@@ -379,6 +389,17 @@
       col.appendChild(row);
       row.appendChild(panel); row.appendChild(liq);
       col.appendChild(vid);
+      // bouton SWITCH chart <-> video (mode cinema)
+      const sw = document.createElement("button");
+      sw.id = "gonVidSwap"; sw.title = "Basculer video / chart"; sw.textContent = "⇄";
+      vid.appendChild(sw);
+      let cinema = false;
+      sw.onclick = (e) => {
+        e.stopPropagation();
+        cinema = !cinema;
+        if (cinema) { gon.mount.appendChild(vid); vid.classList.add("gonCinema"); }
+        else { vid.classList.remove("gonCinema"); col.appendChild(vid); }
+      };
     })();
 
     cvCvd = document.createElement("canvas"); cvCvd.id = "gonConflCvd";

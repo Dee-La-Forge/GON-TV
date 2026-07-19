@@ -119,7 +119,7 @@
         }
       }
     }
-    addBlip(side, usd * 4, false);
+    addBlip(side, usd * 4, false, true);   // silent : le burst a son propre ping grave
     journal(side, usd, curSymbol, true);
     ping(side);
   }
@@ -260,19 +260,15 @@
     for (const rr of [54, R_MAX]) {
       radarCx.beginPath(); radarCx.arc(cxr, cyr, rr, 0, Math.PI * 2); radarCx.stroke();
     }
-    // ECHO synchronise : le bip part quand le FAISCEAU passe sur un contact,
-    // et le contact flashe au meme instant (b.lit). Les blips d'ambiance
-    // (autres symboles) flashent en silence — seuls ceux de TON symbole
-    // sonnent, avec 300 ms mini entre deux echos.
+    // le faisceau ILLUMINE les contacts qu'il croise (visuel seulement —
+    // le son, lui, part a la naissance du blip : synchro directe)
     const TAU = Math.PI * 2, prevA = sweepA % TAU;
     sweepA += 0.014;
     const curA = sweepA % TAU, nowMs = performance.now();
     for (const b of blips) {
       const a = ((b.ang % TAU) + TAU) % TAU;
       const crossed = prevA <= curA ? (a > prevA && a <= curA) : (a > prevA || a <= curA);
-      if (!crossed) continue;
-      b.lit = nowMs;
-      if (!b.dim && nowMs - lastEchoAt > 300) { lastEchoAt = nowMs; sonarTick(); }
+      if (crossed) b.lit = nowMs;
     }
     for (let s = 0; s < 6; s++) {
       const a = sweepA - s * 0.06;
