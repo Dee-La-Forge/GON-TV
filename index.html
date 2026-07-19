@@ -2590,7 +2590,15 @@ if (location.hostname.endsWith('github.io')) {
     const t = await tagNow();
     if (!t) return;
     if (vSym !== symbol) { vSym = symbol; vTag = t; return; }   // (re)base sur le symbole affiche
-    if (t !== vTag && Date.now() - gonLastTouch > 60000) location.reload();
+    if (t === vTag || Date.now() - gonLastTouch <= 60000) return;
+    // ANTI-BOUCLE : le CDN peut servir des ETags incoherents entre noeuds
+    // pendant la propagation (~10 min). Un reload au plus toutes les 12 min
+    // (via sessionStorage, qui survit au reload) casse tout cycle possible ;
+    // 12 min > cache CDN, donc une VRAIE mise a jour passe quand meme.
+    let last = 0; try { last = +(sessionStorage.getItem('gon.reloadedAt') || 0); } catch {}
+    if (Date.now() - last < 12 * 60 * 1000) return;
+    try { sessionStorage.setItem('gon.reloadedAt', String(Date.now())); } catch {}
+    location.reload();
   }, 3 * 60 * 1000);
 }
 
@@ -2607,6 +2615,6 @@ load();
 <script src="poi/poi-feature.js?v=32"></script>
 <script src="poi/liq-flux.js?v=21"></script>
 <script src="poi/whale-sonar.js?v=26"></script>
-<script src="poi/confluence.js?v=22"></script>
+<script src="poi/confluence.js?v=23"></script>
 </body>
 </html>

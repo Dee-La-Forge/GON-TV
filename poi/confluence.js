@@ -351,13 +351,8 @@
     }
     if (ws && ws.readyState === 1 && lastMsgAt && Date.now() - lastMsgAt > STALL_MS) ws.close();
     if (shown()) rebuildFromKlines();
-    // la video a ete sortie du panneau FLUX : elle doit suivre le toggle ≋
-    // (sinon elle reste visible quand l'utilisateur masque les liquidations)
-    const liq = document.getElementById("gonLiqPanel"), vid = document.getElementById("gonLiqVideo");
-    if (liq && vid && !vid.classList.contains("gonCinema")) {
-      const liqHidden = liq.style.display === "none";
-      vid.style.display = liqHidden ? "none" : "";
-    }
+    // (l'ancien suivi video<->toggle ≋ est retire : le toggle n'existe plus,
+    // la visibilite de la video est geree par la media query CSS + le cinema)
   }
 
   /* ---------- construction ---------- */
