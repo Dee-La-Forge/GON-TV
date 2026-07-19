@@ -313,7 +313,7 @@
     const o = actx.createOscillator(), g = actx.createGain();
     o.type = "sine"; o.frequency.setValueAtTime(920, actx.currentTime);
     o.frequency.exponentialRampToValueAtTime(640, actx.currentTime + 0.45);
-    g.gain.setValueAtTime(0.05, actx.currentTime);
+    g.gain.setValueAtTime(0.16, actx.currentTime);
     g.gain.exponentialRampToValueAtTime(0.0004, actx.currentTime + 0.5);
     o.connect(g).connect(actx.destination); o.start(); o.stop(actx.currentTime + 0.55);
   }
