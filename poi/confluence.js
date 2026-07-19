@@ -350,7 +350,7 @@
          pleine largeur en dessous des deux panneaux */
       #gonRightCol { display:flex; flex-direction:column; min-height:0; }
       #gonRightRow { display:flex; flex:1 1 auto; min-height:0; }
-      #gonRightCol > #gonLiqVideo { margin:0 8px 8px 0; border-radius:6px; overflow:hidden;
+      #gonRightCol > #gonLiqVideo { margin:0 8px 8px 0; width:330px; align-self:flex-end; border-radius:6px; overflow:hidden;
         border:1px solid rgba(217,182,77,.14); }
     `;
     document.head.appendChild(css);
