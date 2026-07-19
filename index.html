@@ -2571,6 +2571,29 @@ setInterval(() => {
   } catch {}
 }, 2000);
 
+/* G-ON : RELOAD SUR MISE A JOUR (pages publiques uniquement) — quand une
+   nouvelle archive (niveaux frais) est publiee, github.io sert un fichier au
+   ETag/Last-Modified different. On le sonde toutes les 3 min ; s'il a change
+   depuis le chargement, on recharge la page — mais seulement apres 1 min sans
+   interaction, pour ne jamais couper une session active. Localhost exclu. */
+if (location.hostname.endsWith('github.io')) {
+  let vSym = null, vTag = null;
+  const archUrl = () => 'poi/' + (symbol === 'BTCUSDT' ? 'antho-v1-m15-pois.json' : 'archive-' + symbol + '-m15.json');
+  const tagNow = async () => {
+    try {
+      const r = await fetch(archUrl(), { method: 'HEAD', cache: 'no-store' });
+      return r.ok ? (r.headers.get('etag') || r.headers.get('last-modified')) : null;
+    } catch { return null; }
+  };
+  setInterval(async () => {
+    if (replay || loading) return;
+    const t = await tagNow();
+    if (!t) return;
+    if (vSym !== symbol) { vSym = symbol; vTag = t; return; }   // (re)base sur le symbole affiche
+    if (t !== vTag && Date.now() - gonLastTouch > 60000) location.reload();
+  }, 3 * 60 * 1000);
+}
+
 load();
 </script>
 <!-- G-ON : moteur POI (modules purs testes) + feature live + rendu -->
