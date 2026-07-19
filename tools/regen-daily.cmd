@@ -18,6 +18,9 @@ for %%S in (%SYMBOLS%) do (
   call :step "approach %%S" node backfill-approach.js %%S
 )
 
+rem verdicts de la regle de retest (BTC seulement : pourcentages calibres BTC)
+call :step "outcome BTCUSDT" node backfill-outcome.js BTCUSDT
+
 echo [%date% %time%] ===== fin (worst=%WORST%) ===== >> "%LOG%"
 exit /b %WORST%
 

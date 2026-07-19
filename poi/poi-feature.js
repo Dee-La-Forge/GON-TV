@@ -104,6 +104,10 @@
         statusChangedTs: active ? createdTs + poiConfig.timeframeMs : retestTs,
         lifecycleValidAfterTs, provenance: "antho_v1_canonical",
         climax: index.climax != null ? row[index.climax] === 1 : false,
+        // Verdict de la regle de retest (SL 0.15% / TP 1%, backfill-outcome) :
+        // 1 = valide (✦), 0 = perdu, null = actif / non juge / trop recent.
+        win: index.win != null && row[index.win] !== null && row[index.win] !== undefined
+          ? Number(row[index.win]) : null,
         // Profil d'approche avant premier touch (champ de recherche, pas d'UI) :
         // distance min en ATR ; -1 = retest immediat ; null = non calcule/actif.
         approachAtr: index.approachAtr != null && row[index.approachAtr] !== null
