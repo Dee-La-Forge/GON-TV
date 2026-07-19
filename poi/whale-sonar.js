@@ -33,7 +33,7 @@
   let visible = true, muted = false, curSymbol = "", rafId = 0;
   let cv, cx, radarCv, radarCx, journalEl, btn;
   const waves = [], scars = [], surges = [], blips = [];
-  let sweepA = 0, lastDimBlipAt = 0, lastThrSaveAt = 0;
+  let sweepA = 0, lastDimBlipAt = 0, lastThrSaveAt = 0, lastEchoAt = 0;
 
   /* ---------- statistiques par symbole ---------- */
   const stats = {};
@@ -260,11 +260,20 @@
     for (const rr of [54, R_MAX]) {
       radarCx.beginPath(); radarCx.arc(cxr, cyr, rr, 0, Math.PI * 2); radarCx.stroke();
     }
-    // BIP sonar : un ping doux par tour de balayage, UNIQUEMENT s'il y a
-    // un contact a l'ecran — un sonar ne ping que quand il y a un echo.
-    const prevTurn = Math.floor(sweepA / (Math.PI * 2));
+    // ECHO synchronise : le bip part quand le FAISCEAU passe sur un contact,
+    // et le contact flashe au meme instant (b.lit). Les blips d'ambiance
+    // (autres symboles) flashent en silence — seuls ceux de TON symbole
+    // sonnent, avec 300 ms mini entre deux echos.
+    const TAU = Math.PI * 2, prevA = sweepA % TAU;
     sweepA += 0.014;
-    if (Math.floor(sweepA / (Math.PI * 2)) !== prevTurn && blips.length > 0) sonarTick();
+    const curA = sweepA % TAU, nowMs = performance.now();
+    for (const b of blips) {
+      const a = ((b.ang % TAU) + TAU) % TAU;
+      const crossed = prevA <= curA ? (a > prevA && a <= curA) : (a > prevA || a <= curA);
+      if (!crossed) continue;
+      b.lit = nowMs;
+      if (!b.dim && nowMs - lastEchoAt > 300) { lastEchoAt = nowMs; sonarTick(); }
+    }
     for (let s = 0; s < 6; s++) {
       const a = sweepA - s * 0.06;
       radarCx.strokeStyle = `rgba(217,182,77,${0.5 * (1 - s / 6)})`;
@@ -276,9 +285,12 @@
     for (let i = blips.length - 1; i >= 0; i--) {
       const b = blips[i], age = (performance.now() - b.born) / (b.dim ? 4000 : 9000);
       if (age >= 1) { blips.splice(i, 1); continue; }
-      const hue = b.side === "buy" ? BUY : SELL, al = (1 - age) * (b.dim ? 0.35 : 0.95);
+      const hue = b.side === "buy" ? BUY : SELL;
+      // flash d'illumination quand le faisceau vient de passer (echo visuel)
+      const flash = b.lit ? Math.max(0, 1 - (performance.now() - b.lit) / 500) : 0;
+      const al = Math.min(1, (1 - age) * (b.dim ? 0.35 : 0.95) * (1 + flash));
       const x = cxr + Math.cos(b.ang) * b.dist, y = cyr + Math.sin(b.ang) * b.dist;
-      radarCx.shadowColor = hue; radarCx.shadowBlur = b.dim ? 3 : 9;
+      radarCx.shadowColor = hue; radarCx.shadowBlur = (b.dim ? 3 : 9) + 8 * flash;
       radarCx.fillStyle = rgba(hue, al);
       radarCx.beginPath(); radarCx.arc(x, y, b.r, 0, Math.PI * 2); radarCx.fill();
       if (!b.dim && age < 0.25) {
