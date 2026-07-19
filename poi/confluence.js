@@ -350,11 +350,11 @@
          pleine largeur en dessous des deux panneaux */
       #gonRightCol { display:flex; flex-direction:column; min-height:0; }
       #gonRightRow { display:flex; flex:1 1 auto; min-height:0; }
-      /* equilibre de la colonne : deux tours de largeur EGALE, et la video
-         en socle pleine largeur, format bandeau cinema (21:9, cover) */
+      /* equilibre de la colonne : deux tours de largeur EGALE, et l'ecran
+         video au FORMAT D'ORIGINE (16:9, image complete) en petit, centre */
       #gonRightRow > #gonLiqPanel { flex:0 0 225px; }
-      #gonRightCol > #gonLiqVideo { margin:0 8px 8px 0; align-self:stretch; width:auto;
-        aspect-ratio:28/9; border-radius:6px; overflow:hidden;
+      #gonRightCol > #gonLiqVideo { margin:0 0 8px 0; align-self:center; width:300px;
+        aspect-ratio:16/9; border-radius:6px; overflow:hidden;
         border:1px solid rgba(217,182,77,.14); }
     `;
     document.head.appendChild(css);
