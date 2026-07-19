@@ -260,10 +260,11 @@
     for (const rr of [54, R_MAX]) {
       radarCx.beginPath(); radarCx.arc(cxr, cyr, rr, 0, Math.PI * 2); radarCx.stroke();
     }
-    // BIP sonar : un ping doux a chaque tour complet du balayage
+    // BIP sonar : un ping doux par tour de balayage, UNIQUEMENT s'il y a
+    // un contact a l'ecran — un sonar ne ping que quand il y a un echo.
     const prevTurn = Math.floor(sweepA / (Math.PI * 2));
     sweepA += 0.014;
-    if (Math.floor(sweepA / (Math.PI * 2)) !== prevTurn) sonarTick();
+    if (Math.floor(sweepA / (Math.PI * 2)) !== prevTurn && blips.length > 0) sonarTick();
     for (let s = 0; s < 6; s++) {
       const a = sweepA - s * 0.06;
       radarCx.strokeStyle = `rgba(217,182,77,${0.5 * (1 - s / 6)})`;
