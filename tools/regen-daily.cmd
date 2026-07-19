@@ -27,8 +27,10 @@ exit /b %WORST%
 :step
 set NAME=%~1
 echo [%date% %time%] --- %NAME% --- >> "%LOG%"
-%2 %3 %4 >> "%LOG%" 2>&1
+%2 %3 %4 %5 %6 >> "%LOG%" 2>&1
 set CODE=%errorlevel%
 echo [%date% %time%] %NAME% exit %CODE% >> "%LOG%"
+rem un crash natif de node donne un code NEGATIF : GTR seul ne l'eleverait pas
+if %CODE% NEQ 0 if %WORST% EQU 0 set WORST=1
 if %CODE% GTR %WORST% set WORST=%CODE%
 exit /b 0

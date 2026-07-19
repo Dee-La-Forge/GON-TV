@@ -4,8 +4,8 @@
   /* G-ON CONFLUENCE — colonne "CARNET & PROFIL" + CVD en zone volume.
    * Design valide par maquette (maquette-confluence.html) :
    *   - colonne de verre dediee (soeur de flex, entre le chart et FLUX) :
-   *     Volume Profile construit des bins FOOTPRINT de notre accumulateur
-   *     (fenetre des 192 bougies M15), split bleu/rouge par delta, POC dore ;
+   *     Volume Profile reconstruit des KLINES de la fenetre visible (split
+   *     acheteur par takerBuyVolume), POC dore ;
    *   - murs de liquidite du carnet reel (@depth20@500ms, chemins routes) :
    *     barre = ordre passif massif, solidite = anciennete, "SPOOF ?" sur un
    *     mur qui disparait jeune ; cadre or "MUR + NIVEAU" en confluence avec
@@ -65,6 +65,7 @@
         Math.abs(to - lastFetchRange.to) < span * 0.25) return;
     if (now - lastKlinesAt < 8000) return;       // cadence dure pendant un pan
     klinesBusy = true;
+    lastKlinesAt = now;                          // avance MEME sur echec : pas de martelage 429
     const sym = curSymbol;
     try {
       const [iv] = pickInterval(span);
@@ -73,7 +74,7 @@
       if (!r.ok) return;
       const rows = await r.json();
       if (curSymbol !== sym || !Array.isArray(rows) || rows.length < 2) return;
-      lastKlinesAt = Date.now(); lastFetchRange = { from, to };
+      lastFetchRange = { from, to };
       let lo = Infinity, hi = -Infinity;
       for (const k of rows) { lo = Math.min(lo, +k[3]); hi = Math.max(hi, +k[2]); }
       // bin d'AFFICHAGE ~90 lignes, quantifie sur l'echelle 1/2/5 et avec
@@ -158,7 +159,9 @@
   const shown = () => visible && panel && panel.offsetParent !== null;
 
   function drawPanel(now) {
-    const host = panel.getBoundingClientRect();
+    // rect du CANVAS (top:26px dans le panneau) — dimensionner sur le rect du
+    // panneau decalait tout le rendu de 26 px vers le bas (audit #3).
+    const host = cvPanel.getBoundingClientRect();
     const w = Math.round(host.width), h = Math.round(host.height);
     if (w > 0 && h > 0 && (cvPanel.width !== w || cvPanel.height !== h)) { cvPanel.width = w; cvPanel.height = h; }
     cxPanel.clearRect(0, 0, w, h);
@@ -243,7 +246,10 @@
       }
     };
     const nowMs = Date.now();
-    for (const w of walls.values()) {
+    // flux carnet perime (socket muette) : ne PAS afficher des murs figes qui
+    // paraissent de plus en plus solides — donnee morte = rien.
+    const bookFresh = lastMsgAt && nowMs - lastMsgAt < STALL_MS;
+    if (bookFresh) for (const w of walls.values()) {
       // solidite par anciennete : nait a 0.35, plein a 0.9 apres 20 s
       const age = Math.min(1, (nowMs - w.firstSeen) / 20000);
       drawWall(w.price, w.usd, w.side, 0.35 + 0.55 * age, false);
@@ -303,13 +309,24 @@
     }
     cxCvd.shadowBlur = 0;
     cxCvd.fillStyle = "rgba(110,106,88,.45)"; cxCvd.font = "8px Segoe UI";
-    cxCvd.fillText("CVD 48h", 8, zTop + 11);
+    const spanH = lastFetchRange ? Math.round((lastFetchRange.to - lastFetchRange.from) / 3600) : 0;
+    cxCvd.fillText(spanH >= 48 ? `CVD ${Math.round(spanH / 24)}j` : `CVD ${spanH}h`, 8, zTop + 11);
     cxCvd.restore();
   }
 
+  let hiddenCleared = false;
   function loop() {
     rafId = requestAnimationFrame(loop);
-    if (!shown()) return;
+    if (!shown()) {
+      // le CVD vit sur le CHART : si la colonne se masque (media query),
+      // l'overlay doit etre efface — sinon il reste incruste et se desaligne.
+      if (!hiddenCleared && cxCvd && cvCvd.width) {
+        cxCvd.clearRect(0, 0, cvCvd.width, cvCvd.height);
+        hiddenCleared = true;
+      }
+      return;
+    }
+    hiddenCleared = false;
     const now = performance.now();
     drawPanel(now);
     drawCvd();
@@ -339,7 +356,7 @@
   /* ---------- construction ---------- */
   function build() {
     gon = window.__gon; P = window.__gonPoi;
-    if (!gon || !gon.mount || !P || !P.accumulator) { setTimeout(build, 500); return; }
+    if (!gon || !gon.mount || !P || !P.pois) { setTimeout(build, 500); return; }
     curSymbol = gon.symbol;
 
     const css = document.createElement("style");
@@ -358,6 +375,7 @@
       #gonConflBtn:hover { border-color:#d9b64d; }
       #gonConflBtn.on { opacity:1; text-shadow:0 0 8px rgba(217,182,77,.6); }
       @media (max-width: 1100px) { #gonConflPanel { display:none !important; } }
+      @media (max-width: 860px) { #gonRightCol > #gonLiqVideo { display:none !important; } }
       /* colonne de droite : [profil | liquidations] puis l'ECRAN video
          pleine largeur en dessous des deux panneaux */
       #gonRightCol { display:flex; flex-direction:column; min-height:0; }
@@ -429,8 +447,15 @@
 
     btn = document.createElement("button");
     btn.id = "gonConflBtn"; btn.title = "Carnet & profil + CVD"; btn.textContent = "▮︎";
-    const host = document.getElementById("gonPoiCtl") || document.getElementById("topbar");
-    if (host) host.appendChild(btn);
+    // #gonPoiCtl est cree par poi-feature (setTimeout 0) APRES ce boot
+    // (DOMContentLoaded) : attendre le groupe POI pour ne pas atterrir en
+    // bout de topbar apres le prix.
+    (function mountBtn(tries) {
+      const host = document.getElementById("gonPoiCtl");
+      if (host) { host.appendChild(btn); return; }
+      if (tries > 0) { setTimeout(() => mountBtn(tries - 1), 300); return; }
+      const tb = document.getElementById("topbar"); if (tb) tb.appendChild(btn);
+    })(20);
     try { visible = localStorage.getItem(ON_KEY) !== "0"; } catch (_) {}
     btn.onclick = () => {
       visible = !visible;

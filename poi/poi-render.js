@@ -522,7 +522,11 @@
     // dans toutes les vues, independant des filtres score/climax.
     const WIN_GOLD = "#d9b64d";
     function drawWins(plotW, paneH, pLo, pHi, vis, now) {
-      let w = 0, l = 0;
+      // 1re passe : collecter UNIQUEMENT les ✦ reellement dessinables (x/y
+      // finis) — le compteur ne doit annoncer que ce qui est a l'ecran, et
+      // les perdus dessinables comptent pour le %.
+      const pts = [];
+      let l = 0;
       for (const p of pois) {
         if (p.win !== 1 && p.win !== 0) continue;
         const t = p.firstTouchTs ?? p.statusChangedTs;
@@ -531,27 +535,34 @@
         if (vis && (sec < vis.from || sec > vis.to)) continue;
         const e = p.entry ?? p.entryPrice;
         if (!(e >= pLo && e <= pHi)) continue;
-        if (p.win === 0) { l++; continue; }     // perdus : comptes, pas dessines
-        w++;
         const x = gon.timeToX(sec), y = gon.priceToY(e);
         if (x == null || y == null || !isFinite(x) || !isFinite(y)) continue;
-        const s = 4.5, pulse = 0.8 + 0.2 * Math.sin(now * 0.003);
-        ctx.save();
-        ctx.shadowColor = WIN_GOLD; ctx.shadowBlur = 9 * pulse;
-        ctx.fillStyle = `rgba(217,182,77,${0.92 * pulse})`;
-        ctx.beginPath();
-        ctx.moveTo(x, y - s); ctx.lineTo(x + s, y); ctx.lineTo(x, y + s); ctx.lineTo(x - s, y);
-        ctx.closePath(); ctx.fill();
-        ctx.shadowBlur = 3;
-        ctx.fillStyle = "rgba(255,255,255,.95)";
-        ctx.beginPath(); ctx.arc(x, y, 1.1, 0, Math.PI * 2); ctx.fill();
-        ctx.restore();
+        if (p.win === 0) { l++; continue; }      // perdus : comptes, pas dessines
+        pts.push({ x, y });
       }
-      // compteur sobre : validations visibles dans la fenetre affichee
+      const w = pts.length;
+      // Perf : le shadowBlur est rasterise CPU. Au-dela de ~60 losanges (vue
+      // tres dezoomee), on coupe le glow (rendu plat, toujours dore et net)
+      // pour ne pas payer des centaines de fills flous par frame.
+      const glow = w > 0 && w <= 60, s = 4.5;
+      ctx.save();
+      if (glow) { ctx.shadowColor = WIN_GOLD; ctx.shadowBlur = 8; }
+      ctx.fillStyle = "rgba(217,182,77,.9)";
+      for (const pt of pts) {
+        ctx.beginPath();
+        ctx.moveTo(pt.x, pt.y - s); ctx.lineTo(pt.x + s, pt.y);
+        ctx.lineTo(pt.x, pt.y + s); ctx.lineTo(pt.x - s, pt.y);
+        ctx.closePath(); ctx.fill();
+      }
+      if (glow) ctx.shadowBlur = 0;
+      ctx.fillStyle = "rgba(255,255,255,.95)";
+      for (const pt of pts) { ctx.beginPath(); ctx.arc(pt.x, pt.y, 1.1, 0, Math.PI * 2); ctx.fill(); }
+      ctx.restore();
+      // compteur sobre : validations dessinables dans la fenetre affichee
       if (w + l > 0) {
         ctx.save();
         ctx.font = "600 10px Segoe UI";
-        ctx.shadowColor = WIN_GOLD; ctx.shadowBlur = 6;
+        if (glow) { ctx.shadowColor = WIN_GOLD; ctx.shadowBlur = 6; }
         ctx.fillStyle = "rgba(217,182,77,.9)";
         // a droite de la ligne ATR de la legende (12,16 chevauchait le titre)
         ctx.fillText(`✦ ${w} validés · ${Math.round(100 * w / (w + l))}%`, 235, 79);

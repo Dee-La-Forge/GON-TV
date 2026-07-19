@@ -45,10 +45,30 @@
   function refresh() { render?.setPois(pois.slice()); }
   function log(state, extra) { /* hook statut leger */ if (window.__GON_POI_DEBUG) console.log("[POI]", state, extra || ""); }
 
+  // Budget de poids fapi PARTAGE par IP : le bootstrap pagine des milliers de
+  // requetes aggTrades (poids 20). Sans garde, un demarrage a froid crevait le
+  // budget -> 429 puis ban 418 (escaladant), et le catch du bootstrap faisait
+  // `continue` -> martelage qui prolongeait le ban pour TOUS les collegues
+  // derriere le meme NAT. Cette fenetre de cooldown, honoree avant chaque
+  // appel fapi du module, respecte le Retry-After annonce par Binance.
+  let poiApiCoolUntil = 0;
+  async function fapiFetch(url, signal) {
+    for (let attempt = 0; attempt < 6; attempt++) {
+      const wait = poiApiCoolUntil - Date.now();
+      if (wait > 0) await new Promise((r) => setTimeout(r, Math.min(wait, 60000)));
+      if (signal && signal.aborted) { const e = Error("aborted"); e.name = "AbortError"; throw e; }
+      const response = await fetch(url, { signal });
+      if (response.status !== 429 && response.status !== 418) return response;
+      const ra = Number(response.headers.get("retry-after"));
+      poiApiCoolUntil = Date.now() + (Number.isFinite(ra) && ra > 0 ? ra * 1000 : 60000) + 1000;
+    }
+    throw Error("Binance Futures rate-limit persistant");
+  }
+
   async function fetchAggTrades(ticker, params, signal) {
     const q = new URLSearchParams({ symbol: ticker, limit: String(Math.min(1000, params.limit || 1000)) });
     for (const key of ["fromId", "startTime", "endTime"]) if (Number.isFinite(params[key])) q.set(key, String(Math.floor(params[key])));
-    const response = await fetch(`${FUTURES_AGG_TRADES}?${q}`, { signal });
+    const response = await fapiFetch(`${FUTURES_AGG_TRADES}?${q}`, signal);
     if (!response.ok) throw Error(`Binance Futures aggTrades ${response.status}`);
     return response.json();
   }
@@ -119,7 +139,7 @@
 
   async function seedPoiHistory(ticker, signal) {
     const q = new URLSearchParams({ symbol: ticker, interval: "15m", limit: String(poiConfig.historyCandles) });
-    const response = await fetch(`${FUTURES_KLINES}?${q}`, { signal });
+    const response = await fapiFetch(`${FUTURES_KLINES}?${q}`, signal);
     if (!response.ok) throw Error(`Binance Futures REST ${response.status}`);
     const rows = await response.json();
     const currentStart = poiAccumulator?.getCurrent()?.startTs ?? Infinity;
@@ -473,7 +493,7 @@
   }
   async function fetchLastPrice(ticker, signal) {
     const q = new URLSearchParams({ symbol: ticker, interval: "1m", limit: "1" });
-    const r = await fetch(`${FUTURES_KLINES}?${q}`, { signal });
+    const r = await fapiFetch(`${FUTURES_KLINES}?${q}`, signal);
     if (!r.ok) throw Error(`Binance price ${r.status}`);
     const rows = await r.json();
     return Number(rows[rows.length - 1] && rows[rows.length - 1][4]);

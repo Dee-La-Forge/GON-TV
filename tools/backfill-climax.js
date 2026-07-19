@@ -10,6 +10,7 @@
 
 const fs = require("fs");
 const { acquire, writeArchiveAtomic } = require("./lock");
+const { politeFetch } = require("./http");
 const path = require("path");
 const TF = 15 * 60 * 1000, FAPI = "https://fapi.binance.com", N = 30;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -18,8 +19,7 @@ async function fetchAllKlines(startMs, endMs) {
   const out = [];
   let cursor = startMs;
   while (cursor < endMs) {
-    await sleep(150);
-    const res = await fetch(`${FAPI}/fapi/v1/klines?symbol=BTCUSDT&interval=15m&startTime=${cursor}&limit=1500`);
+    const res = await politeFetch(`${FAPI}/fapi/v1/klines?symbol=BTCUSDT&interval=15m&startTime=${cursor}&limit=1500`);
     if (!res.ok) throw Error(`klines HTTP ${res.status}`);
     const rows = await res.json();
     if (!rows.length) break;

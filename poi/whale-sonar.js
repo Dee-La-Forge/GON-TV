@@ -7,7 +7,8 @@
    *     meme sens en 5 s) sur le symbole affiche ;
    *   - embrasement 30 s du niveau POI touche (⌾ DEFENDU) ;
    *   - sillage vertical qui s'estompe sur la bougie d'impact ;
-   *   - radar sonar en bas a gauche : blips du symbole + ambiance all-market ;
+   *   - radar sonar en HAUT a gauche (sous la legende ATR), le logo G-ON en
+   *     coeur : blips du symbole + ambiance all-market ;
    *   - journal 4 lignes, ping sonar optionnel (clic sur le radar).
    * Seuils en PERCENTILE GLISSANT par symbole (P99.9 / P99.99 du notionnel,
    * ~6000 derniers trades) — jamais de seuil fixe en dollars. Frequences
@@ -83,7 +84,7 @@
     const isCur = sym === curSymbol;
     if (isCur) {
       addBlip(side, n, false);
-      journal(side, n, sym, false);
+      journal(side, n, false);
       // MINI-ECHO : print isole >= P99.99 (~1/h) — petit anneau discret sur
       // la bougie, sans sillage, sans embrasement, sans ping. La pleine onde
       // de choc reste reservee aux bursts.
@@ -121,7 +122,7 @@
       }
     }
     addBlip(side, usd * 4, false, true);   // silent : le burst a son propre ping grave
-    journal(side, usd, curSymbol, true);
+    journal(side, true);
     ping(side);
   }
 
@@ -136,6 +137,7 @@
       if (stats[s].ready) continue;
       try {
         const r = await fetch(`https://fapi.binance.com/fapi/v1/aggTrades?symbol=${s}&limit=1000`);
+        if (r.status === 429 || r.status === 418) break;   // rate-limit : STOP, le live echantillonnera
         if (r.ok) {
           const st = stats[s];
           for (const t of await r.json()) { const n = +t.p * +t.q; if (n > 0) st.arr.push(n); }
@@ -170,6 +172,9 @@
 
   /* ---------- visuels ---------- */
   const shown = () => visible && cv && cv.offsetParent !== null;
+  // le radar (et ses sons) peut etre masque seul par la media query <860px
+  // alors que l'overlay chart reste visible : gate dediee.
+  const radarShown = () => visible && radarCv && radarCv.offsetParent !== null;
 
   function addBlip(side, usd, dim, silent) {
     if (!shown()) return;
@@ -180,7 +185,7 @@
     if (blips.length > 90) blips.shift();
   }
 
-  function journal(side, usd, sym, big) {
+  function journal(side, usd, big) {
     if (!journalEl) return;
     const hue = side === "buy" ? BUY : SELL;
     const row = document.createElement("div");
@@ -194,7 +199,7 @@
     let a = 1; for (const c of journalEl.children) { c.style.opacity = a; a *= 0.68; }
   }
 
-  function drawWaves(now, w, plotW) {
+  function drawWaves(now, plotW) {
     for (let i = waves.length - 1; i >= 0; i--) {
       const wv = waves[i], a = (now - wv.born) / (wv.mini ? 1200 : 1900);
       if (a >= 1) { waves.splice(i, 1); continue; }
@@ -327,8 +332,9 @@
   }
 
   function ping(side) {
-    if (muted || !actx) return;
-    if (actx.state === "suspended") { actx.resume().catch(() => {}); }
+    if (muted || !actx || !shown()) return;
+    // suspendu : on reveille et on SAUTE — un ping en retard est pire qu'absent
+    if (actx.state === "suspended") { actx.resume().catch(() => {}); return; }
     const o = actx.createOscillator(), g = actx.createGain();
     o.type = "sine"; o.frequency.value = side === "buy" ? 96 : 74;
     g.gain.setValueAtTime(0.22, actx.currentTime);
@@ -347,7 +353,7 @@
     const plotW = cv.width - 64;
     const now = performance.now();
     drawSurges(now, plotW);
-    drawWaves(now, cv.width, plotW);
+    drawWaves(now, plotW);
     drawRadar(now);
     if (Date.now() - lastThrSaveAt > 60000) { lastThrSaveAt = Date.now(); saveThr(); }
   }
@@ -431,8 +437,15 @@
 
     btn = document.createElement("button");
     btn.id = "gonWhaleBtn"; btn.title = "Sonar baleines"; btn.textContent = "◎︎";
-    const host = document.getElementById("gonPoiCtl") || document.getElementById("topbar");
-    if (host) host.appendChild(btn);
+    // #gonPoiCtl est cree par poi-feature (setTimeout 0) APRES ce boot
+    // (DOMContentLoaded) : attendre le groupe POI pour ne pas atterrir en
+    // bout de topbar apres le prix.
+    (function mountBtn(tries) {
+      const host = document.getElementById("gonPoiCtl");
+      if (host) { host.appendChild(btn); return; }
+      if (tries > 0) { setTimeout(() => mountBtn(tries - 1), 300); return; }
+      const tb = document.getElementById("topbar"); if (tb) tb.appendChild(btn);
+    })(20);
     try { visible = localStorage.getItem(ON_KEY) !== "0"; } catch (_) {}
     btn.onclick = () => {
       visible = !visible;

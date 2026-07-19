@@ -67,15 +67,19 @@ async function fetch1m(startMs, endMs) {
     const dir = r[IDX.direction] === "L" ? 1 : -1;
     const entry = Number(r[IDX.entryPrice]);
     const tTouch = Number(r[IDX.retestTs]);
-    if (!(entry > 0)) continue;
+    // injugeable (entry invalide, 1m du touch absente, entry jamais atteinte
+    // dans la fenetre) : marquer -1 DEFINITIVEMENT — laisser null epinglait le
+    // t0 du fetch sur la plus vieille ligne et re-telechargeait toute
+    // l'histoire 1m chaque jour, a perpetuite.
+    if (!(entry > 0)) { r[IDX.win] = -1; continue; }
     const sl = entry * (1 - dir * SL_PCT), tp = entry * (1 + dir * TP_PCT);
     const i0 = idxAt.get(floor1m(tTouch));
-    if (i0 == null) continue;
+    if (i0 == null) { r[IDX.win] = -1; continue; }
     let started = -1;
     for (let k = i0; k < Math.min(i0 + 15, m1.length); k++) {
       if (m1[k].l <= entry && m1[k].h >= entry) { started = k; break; }
     }
-    if (started < 0) continue;
+    if (started < 0) { r[IDX.win] = -1; continue; }
     // REJET : la bougie de touch doit arriver du bon cote du niveau —
     // par-DESSUS pour un long, par-DESSOUS pour un short. Sinon le prix
     // traverse sans setup de rejet : non eligible.
@@ -90,9 +94,14 @@ async function fetch1m(startMs, endMs) {
       if (hitSL) { verdict = 0; break; }        // ambigu inclus : perdant
       if (hitTP) { verdict = 1; break; }
     }
-    // touche trop recente encore sans verdict : laisser null (re-jugee demain)
-    if (verdict === null && Date.now() - tTouch < MAX_HOLD_MS) { open++; continue; }
-    r[IDX.win] = verdict === 1 ? 1 : 0;
+    if (verdict === null) {
+      // encore dans sa fenetre de 7 j : laisser null, re-jugee demain
+      if (Date.now() - tTouch < MAX_HOLD_MS) { open++; continue; }
+      // fenetre ecoulee sans SL ni TP : NON RESOLU = exclu (-1), comme
+      // l'etude backtest-touch — jamais compte perdant par defaut.
+      r[IDX.win] = -1; continue;
+    }
+    r[IDX.win] = verdict;
     if (verdict === 1) win++; else loss++;
   }
   writeArchiveAtomic(ARCHIVE_PATH, JSON.stringify(archive) + "\n");
