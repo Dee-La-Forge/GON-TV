@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>G-ON — CONFLUENCE · maquette Profile / CVD / Murs</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#05060a; color:#c9c4b4; font:12px/1.4 "Segoe UI", sans-serif; overflow:hidden; }
+  #stage { position:relative; width:100vw; height:100vh; }
+  canvas { position:absolute; inset:0; width:100%; height:100%; }
+  #title { position:absolute; top:14px; left:18px; font-size:13px; letter-spacing:4px; color:#d9b64d; z-index:3; }
+  #title b { color:#f2ead2; font-weight:600; }
+  #subtitle { position:absolute; top:34px; left:18px; font-size:9px; letter-spacing:2px; color:#6e6a58; z-index:3; }
+  #ctl { position:absolute; bottom:10px; left:50%; transform:translateX(-50%);
+         display:flex; gap:8px; z-index:3; }
+  #ctl button { background:#0a0c12; color:#d9b64d; border:1px solid #232635; font:10px "Segoe UI";
+                letter-spacing:1.5px; padding:5px 12px; cursor:pointer; }
+  #ctl button.off { color:#5c584a; }
+  #ctl button:hover { border-color:#d9b64d; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="chart"></canvas>
+  <canvas id="fx"></canvas>
+  <div id="title">G◎N <b>CONFLUENCE</b></div>
+  <div id="subtitle">COLONNE CARNET & PROFIL · CVD EN ZONE VOLUME — MAQUETTE</div>
+  <div id="ctl">
+    <button id="bProf">▮ PROFIL</button>
+    <button id="bWall">▬ MURS</button>
+    <button id="bCvd">∿ CVD</button>
+  </div>
+</div>
+<script>
+"use strict";
+/* Langage G-ON : bleu=achat, rouge=vente, or reserve au chrome.
+ * EXCEPTION validee par Meddy (19/07) : degrade autorise pour l'aire sous la
+ * courbe CVD — seule entorse a la regle "jamais de degrades". */
+const BUY = "#2f8bff", SELL = "#ff2d5e", GOLD = "#d9b64d";
+const rgba = (hex, a) => { const n = parseInt(hex.slice(1), 16);
+  return `rgba(${n>>16&255},${n>>8&255},${n&255},${a})`; };
+
+const chart = document.getElementById("chart"), cx = chart.getContext("2d");
+const fx = document.getElementById("fx"), fc = fx.getContext("2d");
+let W = 0, H = 0, dpr = devicePixelRatio || 1;
+const BOT_H = 150;                        // bandeau bas : volume + CVD
+const PANEL_W = 210;                      // colonne carnet & profil
+function resize() {
+  W = innerWidth; H = innerHeight;
+  for (const c of [chart, fx]) { c.width = W * dpr; c.height = H * dpr;
+    c.getContext("2d").setTransform(dpr, 0, 0, dpr, 0, 0); }
+  drawStatic();
+}
+addEventListener("resize", resize);
+
+/* ---- serie ---- */
+const N = 150, candles = [];
+(function gen() {
+  let p = 64200;
+  for (let i = 0; i < N; i++) {
+    const o = p, drift = Math.sin(i / 16) * 45;
+    const c = o + (Math.random() - 0.5) * 110 + drift * 0.3;
+    const hi = Math.max(o, c) + Math.random() * 40, lo = Math.min(o, c) - Math.random() * 40;
+    const vol = 40 + Math.random() * 160 + (Math.abs(c - o) > 60 ? 180 : 0);
+    candles.push({ o, c, hi, lo, vol }); p = c;
+  }
+  candles[N-8].lo -= 90; candles[N-8].c = candles[N-8].o - 70;   // bas marque (divergence)
+})();
+const PMIN = Math.min(...candles.map(k => k.lo)) - 60, PMAX = Math.max(...candles.map(k => k.hi)) + 60;
+const paneTop = 50, paneBot = () => H - BOT_H - 26;
+const yOf = (p) => (PMAX - p) / (PMAX - PMIN) * (paneBot() - paneTop) + paneTop;
+const chartR = () => W - PANEL_W - 26;
+const xOf = (i) => 56 + i * ((chartR() - 76) / N);
+const VMAX = Math.max(...candles.map(k => k.vol));
+
+/* ---- profil (bins 30$) ---- */
+const BIN = 30, prof = new Map();
+for (const k of candles) {
+  const lo = Math.floor(k.lo / BIN), hi = Math.floor(k.hi / BIN);
+  for (let b = lo; b <= hi; b++) {
+    const e = prof.get(b) || { buy: 0, sell: 0 };
+    const w = k.vol / (hi - lo + 1), up = k.c >= k.o;
+    e.buy += up ? w * 0.62 : w * 0.38; e.sell += up ? w * 0.38 : w * 0.62;
+    prof.set(b, e);
+  }
+}
+const profMax = Math.max(...[...prof.values()].map(e => e.buy + e.sell));
+const pocBin = [...prof.entries()].sort((a, b) => (b[1].buy + b[1].sell) - (a[1].buy + a[1].sell))[0][0];
+
+/* ---- niveaux + murs (cales sur la serie) ---- */
+const RANGE = PMAX - PMIN, q = (f) => PMIN + RANGE * f;
+const LEVELS = [
+  { price: q(0.80), side: "short", score: 84 },
+  { price: q(0.38), side: "long",  score: 91 },
+  { price: q(0.20), side: "long",  score: 57 }
+];
+const WALLS = [
+  { price: q(0.90), usd: 24e6, side: "ask" },
+  { price: q(0.80), usd: 41e6, side: "ask", confl: true },
+  { price: q(0.62), usd: 9e6,  side: "ask", spoof: true },
+  { price: q(0.38), usd: 52e6, side: "bid", confl: true },
+  { price: q(0.29), usd: 15e6, side: "bid" },
+  { price: q(0.12), usd: 30e6, side: "bid" }
+];
+
+/* ---- CVD ---- */
+const cvd = [0];
+for (let i = 0; i < N; i++) {
+  const k = candles[i], body = k.c - k.o;
+  let d = body * (0.9 + Math.random() * 0.6) * (k.vol / 120);
+  if (i >= N - 8) d = Math.abs(d) * 0.9;
+  cvd.push(cvd[i] + d);
+}
+const CMIN = Math.min(...cvd), CMAX = Math.max(...cvd);
+const botTop = () => H - BOT_H - 12;
+const cy = (v) => H - 20 - (v - CMIN) / (CMAX - CMIN) * (BOT_H - 46);
+
+/* ---- fond statique ---- */
+function roundRect(g, x, y, w, h, r) {
+  g.beginPath();
+  g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r);
+  g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath();
+}
+function drawStatic() {
+  cx.clearRect(0, 0, W, H);
+  cx.fillStyle = "#05060a"; cx.fillRect(0, 0, W, H);
+  cx.strokeStyle = "#0d0f16";
+  for (let gy = paneTop; gy < paneBot(); gy += 64) { cx.beginPath(); cx.moveTo(0, gy); cx.lineTo(chartR(), gy); cx.stroke(); }
+  const bw = Math.max(2, (chartR() - 76) / N * 0.55);
+  candles.forEach((k, i) => {
+    const x = xOf(i), up = k.c >= k.o, col = up ? "#274b71" : "#6e2c41";
+    cx.strokeStyle = col; cx.lineWidth = 1;
+    cx.beginPath(); cx.moveTo(x, yOf(k.hi)); cx.lineTo(x, yOf(k.lo)); cx.stroke();
+    cx.fillStyle = col; const y1 = yOf(Math.max(k.o, k.c)), y2 = yOf(Math.min(k.o, k.c));
+    cx.fillRect(x - bw / 2, y1, bw, Math.max(1, y2 - y1));
+  });
+  // bandeau bas : separation + volume
+  cx.strokeStyle = "rgba(217,182,77,.16)";
+  cx.beginPath(); cx.moveTo(0, botTop() + 0.5); cx.lineTo(W, botTop() + 0.5); cx.stroke();
+  cx.fillStyle = "#6e6a58"; cx.font = "9px Segoe UI";
+  cx.fillText("V O L U M E   +   C V D", 18, botTop() + 15);
+  candles.forEach((k, i) => {
+    const x = xOf(i), up = k.c >= k.o;
+    const h = k.vol / VMAX * (BOT_H - 56);
+    cx.fillStyle = up ? "rgba(39,75,113,.55)" : "rgba(110,44,65,.55)";
+    cx.fillRect(x - bw / 2, H - 16 - h, bw, h);
+  });
+}
+
+/* ---- couches animees ---- */
+const on = { prof: true, wall: true, cvd: true };
+function laser(y, x1, x2, hue) {
+  fc.strokeStyle = "rgba(0,0,0,.8)"; fc.lineWidth = 2.6;
+  fc.beginPath(); fc.moveTo(x1, y); fc.lineTo(x2, y); fc.stroke();
+  fc.shadowColor = hue; fc.shadowBlur = 6;
+  fc.strokeStyle = rgba(hue, 0.6); fc.lineWidth = 0.9;
+  fc.beginPath(); fc.moveTo(x1, y); fc.lineTo(x2, y); fc.stroke();
+  fc.shadowBlur = 3;
+  fc.strokeStyle = "rgba(255,255,255,.8)"; fc.lineWidth = 0.5;
+  fc.beginPath(); fc.moveTo(x1, y); fc.lineTo(x2, y); fc.stroke();
+}
+
+function loop() {
+  const now = performance.now();
+  fc.clearRect(0, 0, W, H);
+  const pX = W - PANEL_W - 12, pY = 12, pW = PANEL_W, pH = paneBot() - 4;
+
+  // --- niveaux POI (chart)
+  for (const L of LEVELS) {
+    const y = Math.round(yOf(L.price)) + 0.5, hue = L.side === "long" ? BUY : SELL;
+    fc.save(); laser(y, 56, chartR() - 46, hue); fc.restore();
+    fc.fillStyle = rgba(hue, 0.9); fc.font = "10px Segoe UI";
+    fc.fillText(L.score, chartR() - 38, y + 3);
+    // connecteur discret vers la colonne (meme y : preuve d'alignement)
+    fc.save(); fc.setLineDash([2, 5]);
+    fc.strokeStyle = rgba(hue, 0.25); fc.lineWidth = 1;
+    fc.beginPath(); fc.moveTo(chartR() - 18, y); fc.lineTo(pX, y); fc.stroke();
+    fc.restore();
+  }
+
+  // --- COLONNE CARNET & PROFIL (panneau de verre dedie)
+  fc.save();
+  fc.fillStyle = "rgba(10,10,8,.88)";
+  roundRect(fc, pX, pY, pW, pH, 6); fc.fill();
+  fc.strokeStyle = "rgba(217,182,77,.14)"; fc.lineWidth = 1; fc.stroke();
+  fc.fillStyle = GOLD; fc.font = "600 9px Segoe UI";
+  fc.fillText("C A R N E T   &   P R O F I L", pX + 14, pY + 18);
+  fc.strokeStyle = "rgba(217,182,77,.10)";
+  fc.beginPath(); fc.moveTo(pX + 10, pY + 26.5); fc.lineTo(pX + pW - 10, pY + 26.5); fc.stroke();
+  roundRect(fc, pX, pY, pW, pH, 6); fc.clip();
+
+  const innerR = pX + pW - 12, maxW = pW - 66;
+  if (on.prof) {
+    for (const [b, e] of prof) {
+      const y = yOf(b * BIN + BIN / 2), h = Math.max(2, (yOf(0) - yOf(BIN)) * 0.72);
+      if (y < pY + 34 || y > pY + pH - 8) continue;
+      const tot = e.buy + e.sell, w = tot / profMax * maxW;
+      const wBuy = w * e.buy / tot;
+      fc.fillStyle = rgba(BUY, b === pocBin ? 0.55 : 0.24);
+      fc.fillRect(innerR - w, y - h / 2, wBuy, h);
+      fc.fillStyle = rgba(SELL, b === pocBin ? 0.55 : 0.24);
+      fc.fillRect(innerR - w + wBuy, y - h / 2, w - wBuy, h);
+      if (b === pocBin) {
+        const pulse = 0.75 + 0.25 * Math.sin(now * 0.004);
+        fc.save(); fc.shadowColor = GOLD; fc.shadowBlur = 8 * pulse;
+        fc.strokeStyle = `rgba(255,255,255,${0.8 * pulse})`; fc.lineWidth = 0.7;
+        fc.strokeRect(innerR - w, y - h / 2, w, h); fc.restore();
+        fc.fillStyle = GOLD; fc.font = "600 9px Segoe UI";
+        fc.fillText("POC", innerR - w - 26, y + 3);
+      }
+    }
+  }
+  if (on.wall) {
+    for (const w of WALLS) {
+      const y = Math.round(yOf(w.price)), hue = w.side === "bid" ? BUY : SELL;
+      if (y < pY + 34 || y > pY + pH - 8) continue;
+      const len = 40 + Math.log10(w.usd / 1e6) * 46;
+      let al = 0.9;
+      if (w.spoof) { const ph = (now % 2300) / 2300; al = ph < 0.61 ? 0.75 : 0.06; }
+      fc.save();
+      fc.shadowColor = hue; fc.shadowBlur = 12 * al;
+      fc.fillStyle = rgba(hue, 0.6 * al);
+      fc.fillRect(innerR - len, y - 3, len, 6);
+      fc.fillStyle = `rgba(255,255,255,${0.9 * al})`;
+      fc.fillRect(innerR - len, y - 3, 2.2, 6);
+      fc.restore();
+      fc.fillStyle = rgba(hue, Math.max(0.3, al)); fc.font = "600 9px Segoe UI";
+      fc.fillText((w.usd / 1e6).toFixed(0) + "M$", innerR - len - 28, y + 3);
+      if (w.spoof && al > 0.3) { fc.fillStyle = "rgba(110,106,88,.9)"; fc.fillText("SPOOF ?", innerR - len - 74, y + 3); }
+      if (w.confl) {
+        const pulse = 0.7 + 0.3 * Math.sin(now * 0.005);
+        fc.save(); fc.shadowColor = GOLD; fc.shadowBlur = 10 * pulse;
+        fc.strokeStyle = `rgba(217,182,77,${0.75 * pulse})`; fc.lineWidth = 1;
+        fc.strokeRect(innerR - len - 4, y - 7, len + 8, 14); fc.restore();
+        fc.fillStyle = GOLD; fc.font = "600 8px Segoe UI";
+        fc.fillText("MUR + NIVEAU", innerR - len - 4, y - 11);
+      }
+    }
+  }
+  fc.restore();
+
+  // --- CVD : courbe en zone volume, aire en DEGRADE (exception charte)
+  if (on.cvd) {
+    const y0 = cy(0);
+    fc.save();
+    fc.beginPath(); fc.rect(0, botTop() + 2, W, BOT_H); fc.clip();
+    // aire au-dessus / en-dessous de zero, chacun son degrade vers zero
+    for (const sign of [1, -1]) {
+      fc.beginPath(); fc.moveTo(xOf(0), y0);
+      for (let i = 0; i <= N; i++) {
+        const v = cvd[i], vy = sign > 0 ? Math.min(cy(v), y0) : Math.max(cy(v), y0);
+        fc.lineTo(xOf(Math.min(i, N - 1)), vy);
+      }
+      fc.lineTo(xOf(N - 1), y0); fc.closePath();
+      const grad = fc.createLinearGradient(0, sign > 0 ? cy(CMAX) : cy(CMIN), 0, y0);
+      const hue = sign > 0 ? BUY : SELL;
+      grad.addColorStop(0, rgba(hue, 0.34));
+      grad.addColorStop(1, rgba(hue, 0.02));
+      fc.fillStyle = grad; fc.fill();
+    }
+    // ligne de zero + courbe nette par-dessus
+    fc.setLineDash([4, 4]);
+    fc.strokeStyle = "rgba(110,106,88,.4)"; fc.lineWidth = 1;
+    fc.beginPath(); fc.moveTo(0, y0); fc.lineTo(chartR(), y0); fc.stroke();
+    fc.setLineDash([]);
+    for (let i = 1; i <= N; i++) {
+      const hue = cvd[i] >= cvd[i - 1] ? BUY : SELL;
+      fc.shadowColor = hue; fc.shadowBlur = 6;
+      fc.strokeStyle = rgba(hue, 0.9); fc.lineWidth = 1.3;
+      fc.beginPath(); fc.moveTo(xOf(i - 1), cy(cvd[i - 1])); fc.lineTo(xOf(Math.min(i, N - 1)), cy(cvd[i])); fc.stroke();
+    }
+    fc.shadowBlur = 0;
+    // divergence
+    const iD = N - 8, xD = xOf(iD);
+    const pulse = 0.7 + 0.3 * Math.sin(now * 0.006);
+    fc.setLineDash([3, 3]);
+    fc.strokeStyle = `rgba(217,182,77,${0.5 * pulse})`; fc.lineWidth = 1;
+    fc.beginPath(); fc.moveTo(xD, botTop() + 4); fc.lineTo(xD, cy(cvd[iD])); fc.stroke();
+    fc.setLineDash([]);
+    fc.fillStyle = GOLD; fc.font = "600 9px Segoe UI";
+    fc.fillText("⌾ DIVERGENCE", xD - 34, cy(cvd[iD]) - 10);
+    fc.restore();
+  }
+
+  requestAnimationFrame(loop);
+}
+
+for (const [id, key] of [["bProf", "prof"], ["bWall", "wall"], ["bCvd", "cvd"]]) {
+  document.getElementById(id).onclick = (e) => {
+    on[key] = !on[key]; e.target.classList.toggle("off", !on[key]);
+    drawStatic();
+  };
+}
+resize();
+loop();
+</script>
+</body>
+</html>

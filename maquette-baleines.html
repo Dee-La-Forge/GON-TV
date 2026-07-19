@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>G-ON — SONAR · maquette baleines</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#05060a; color:#c9c4b4; font:12px/1.4 "Segoe UI", sans-serif; overflow:hidden; }
+  #stage { position:relative; width:100vw; height:100vh; }
+  canvas { position:absolute; inset:0; width:100%; height:100%; }
+  /* chrome */
+  .lbl { position:absolute; font-size:9px; letter-spacing:2.5px; color:#6e6a58; text-transform:uppercase; }
+  #title { position:absolute; top:14px; left:18px; font-size:13px; letter-spacing:4px; color:#d9b64d; }
+  #title b { color:#f2ead2; font-weight:600; }
+  #subtitle { position:absolute; top:34px; left:18px; font-size:9px; letter-spacing:2px; color:#6e6a58; }
+  /* journal baleines */
+  #log { position:absolute; top:14px; right:16px; width:230px; }
+  #log .lbl { position:static; display:block; margin-bottom:6px; }
+  .ev { display:flex; align-items:center; gap:7px; padding:3px 0; font-size:11px;
+        border-bottom:1px solid #14161f; }
+  .ev i { width:6px; height:6px; border-radius:50%; flex:none; }
+  .ev .amt { font-weight:600; font-variant-numeric:tabular-nums; }
+  .ev .sym { color:#6e6a58; font-size:9px; letter-spacing:1px; }
+  .ev .tm  { margin-left:auto; color:#6e6a58; font-size:9px; font-variant-numeric:tabular-nums; }
+  /* radar */
+  #radarWrap { position:absolute; left:26px; bottom:64px; width:150px; height:150px; }
+  #radarLbl { position:absolute; bottom:-16px; width:100%; text-align:center; font-size:9px;
+              letter-spacing:3px; color:#6e6a58; }
+  /* controles maquette */
+  #ctl { position:absolute; bottom:12px; left:50%; transform:translateX(-50%);
+         display:flex; gap:8px; align-items:center; }
+  #ctl button { background:#0a0c12; color:#c9c4b4; border:1px solid #232635; font:10px "Segoe UI";
+                letter-spacing:1.5px; padding:5px 12px; cursor:pointer; }
+  #ctl button:hover { border-color:#d9b64d; color:#f2ead2; }
+  #ctl .note { font-size:9px; color:#6e6a58; letter-spacing:1px; margin-left:10px; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="chart"></canvas>
+  <canvas id="fx"></canvas>
+  <div id="title">G◎N <b>SONAR</b></div>
+  <div id="subtitle">DÉTECTION DE BALEINES — MAQUETTE (rythme accéléré ×20)</div>
+  <div id="log"><span class="lbl">Journal baleines</span><div id="evs"></div></div>
+  <div id="radarWrap"><canvas id="radar" width="300" height="300" style="width:150px;height:150px"></canvas>
+    <div id="radarLbl">SONAR</div></div>
+  <div id="ctl">
+    <button id="bLong">⌾ BURST ACHAT</button>
+    <button id="bShort">⌾ BURST VENTE</button>
+    <button id="bSnd">♪ SON</button>
+    <span class="note">ondes auto · ambiance all-market sur le sonar</span>
+  </div>
+</div>
+<script>
+"use strict";
+/* Maquette SONAR — langage G-ON : aucun degrade, glow par shadowBlur,
+ * bleu = achat (long), rouge = vente (short), or reserve au chrome. */
+const BUY = "#2f8bff", SELL = "#ff2d5e", GOLD = "#d9b64d";
+const rgba = (hex, a) => { const n = parseInt(hex.slice(1), 16);
+  return `rgba(${n>>16&255},${n>>8&255},${n&255},${a})`; };
+
+const chart = document.getElementById("chart"), cx = chart.getContext("2d");
+const fx = document.getElementById("fx"), fc = fx.getContext("2d");
+const radar = document.getElementById("radar"), rc = radar.getContext("2d");
+let W = 0, H = 0, dpr = devicePixelRatio || 1;
+function resize() {
+  W = innerWidth; H = innerHeight;
+  for (const c of [chart, fx]) { c.width = W * dpr; c.height = H * dpr;
+    c.getContext("2d").setTransform(dpr, 0, 0, dpr, 0, 0); }
+  drawChart();
+}
+addEventListener("resize", resize);
+
+/* ---- fausse serie de bougies + niveaux POI ------------------------------ */
+const candles = [];
+(function gen() {
+  let p = 64200, t = 0;
+  for (let i = 0; i < 160; i++) {
+    const o = p, drift = Math.sin(i / 14) * 40, r = (Math.random() - 0.5) * 120 + drift * 0.3;
+    const c = o + r, hi = Math.max(o, c) + Math.random() * 45, lo = Math.min(o, c) - Math.random() * 45;
+    candles.push({ o, c, hi, lo }); p = c;
+  }
+})();
+const PMIN = Math.min(...candles.map(c => c.lo)) - 60, PMAX = Math.max(...candles.map(c => c.hi)) + 60;
+const yOf = (p) => (PMAX - p) / (PMAX - PMIN) * (H - 90) + 30;
+const xOf = (i) => 60 + i * ((W - 320) / 160);
+const LEVELS = [
+  { price: 64470, side: "short", score: 82, lit: 0 },
+  { price: 64020, side: "long",  score: 74, lit: 0 },
+  { price: 63780, side: "long",  score: 91, lit: 0 }
+];
+
+function drawChart() {
+  cx.clearRect(0, 0, W, H);
+  cx.fillStyle = "#05060a"; cx.fillRect(0, 0, W, H);
+  cx.strokeStyle = "#0d0f16";
+  for (let gy = 30; gy < H - 60; gy += 60) { cx.beginPath(); cx.moveTo(0, gy); cx.lineTo(W, gy); cx.stroke(); }
+  const bw = Math.max(2, (W - 320) / 160 * 0.55);
+  candles.forEach((k, i) => {
+    const x = xOf(i), up = k.c >= k.o, col = up ? "#274b71" : "#6e2c41";
+    cx.strokeStyle = col; cx.lineWidth = 1;
+    cx.beginPath(); cx.moveTo(x, yOf(k.hi)); cx.lineTo(x, yOf(k.lo)); cx.stroke();
+    cx.fillStyle = col; const y1 = yOf(Math.max(k.o, k.c)), y2 = yOf(Math.min(k.o, k.c));
+    cx.fillRect(x - bw / 2, y1, bw, Math.max(1, y2 - y1));
+  });
+}
+
+/* ---- niveaux laser (multi-passes, pulse quand embrase) ------------------ */
+function drawLevels(now) {
+  for (const L of LEVELS) {
+    const y = Math.round(yOf(L.price)) + 0.5, hue = L.side === "long" ? BUY : SELL;
+    const surge = Math.max(0, L.lit - now) / 30000;             // 0..1 pendant 30 s
+    const pulse = surge > 0 ? 1 + 0.8 * Math.sin(now * 0.012) * surge : 1;
+    fc.save();
+    fc.strokeStyle = "rgba(0,0,0,.8)"; fc.lineWidth = 2.6;
+    fc.beginPath(); fc.moveTo(60, y); fc.lineTo(W - 240, y); fc.stroke();
+    fc.shadowColor = hue; fc.shadowBlur = (6 + 14 * surge) * pulse;
+    fc.strokeStyle = rgba(hue, 0.55 + 0.35 * surge); fc.lineWidth = 0.9 * pulse;
+    fc.beginPath(); fc.moveTo(60, y); fc.lineTo(W - 240, y); fc.stroke();
+    fc.shadowBlur = (3 + 8 * surge) * pulse;
+    fc.strokeStyle = `rgba(255,255,255,${0.75 + 0.25 * surge})`; fc.lineWidth = 0.5;
+    fc.beginPath(); fc.moveTo(60, y); fc.lineTo(W - 240, y); fc.stroke();
+    fc.restore();
+    fc.fillStyle = rgba(hue, 0.9); fc.font = "10px Segoe UI";
+    fc.fillText(L.score + (surge > 0 ? "  ⌾ DÉFENDU" : ""), W - 232, y + 3);
+  }
+}
+
+/* ---- ondes de choc + sillages ------------------------------------------- */
+const waves = [], scars = [];
+function shock(x, y, side, usd) {
+  waves.push({ x, y, side, usd, born: performance.now() });
+  scars.push({ x, side, born: performance.now() });
+  for (const L of LEVELS) {
+    if (Math.abs(yOf(L.price) - y) < 34) L.lit = performance.now() + 30000;
+  }
+  ping(side);
+}
+function drawWaves(now) {
+  for (let i = waves.length - 1; i >= 0; i--) {
+    const w = waves[i], a = (now - w.born) / 1900;
+    if (a >= 1) { waves.splice(i, 1); continue; }
+    const r = 14 + a * a * 230, al = (1 - a);
+    const hue = w.side === "buy" ? BUY : SELL;
+    fc.save();
+    fc.shadowColor = hue; fc.shadowBlur = 22 * al;
+    fc.strokeStyle = rgba(hue, 0.75 * al); fc.lineWidth = 2.2 * al + 0.4;
+    fc.beginPath(); fc.arc(w.x, w.y, r, 0, Math.PI * 2); fc.stroke();
+    fc.shadowBlur = 8 * al;
+    fc.strokeStyle = `rgba(255,255,255,${0.85 * al})`; fc.lineWidth = 0.7;
+    fc.beginPath(); fc.arc(w.x, w.y, r, 0, Math.PI * 2); fc.stroke();
+    // point d'impact
+    fc.shadowBlur = 14; fc.fillStyle = `rgba(255,255,255,${al})`;
+    fc.beginPath(); fc.arc(w.x, w.y, 2.4, 0, Math.PI * 2); fc.fill();
+    fc.restore();
+  }
+  for (let i = scars.length - 1; i >= 0; i--) {
+    const s = scars[i], a = (now - s.born) / 90000;             // 90 s de sillage
+    if (a >= 1) { scars.splice(i, 1); continue; }
+    const hue = s.side === "buy" ? BUY : SELL;
+    fc.strokeStyle = rgba(hue, 0.16 * (1 - a)); fc.lineWidth = 1;
+    fc.beginPath(); fc.moveTo(s.x, 30); fc.lineTo(s.x, H - 60); fc.stroke();
+  }
+}
+
+/* ---- radar sonar --------------------------------------------------------- */
+const blips = [];
+let sweepA = 0;
+function addBlip(side, usd, dim) {
+  blips.push({ side, dim, born: performance.now(),
+    r: dim ? 1.6 : Math.min(6, 2 + Math.log10(usd / 1e5) * 2.2),
+    ang: Math.random() * Math.PI * 2, dist: 22 + Math.random() * 108 });
+}
+function drawRadar(now) {
+  rc.setTransform(2, 0, 0, 2, 0, 0);                            // canvas 300 -> 150 css
+  rc.clearRect(0, 0, 150, 150);
+  const cxr = 75, cyr = 75;
+  rc.strokeStyle = "rgba(217,182,77,.18)"; rc.lineWidth = 1;
+  for (const rr of [30, 55, 72]) { rc.beginPath(); rc.arc(cxr, cyr, rr, 0, Math.PI * 2); rc.stroke(); }
+  rc.strokeStyle = "rgba(217,182,77,.10)";
+  rc.beginPath(); rc.moveTo(cxr - 72, cyr); rc.lineTo(cxr + 72, cyr); rc.stroke();
+  rc.beginPath(); rc.moveTo(cxr, cyr - 72); rc.lineTo(cxr, cyr + 72); rc.stroke();
+  // balayage : ligne + remanence en 5 segments (aucun degrade)
+  sweepA += 0.014;
+  for (let s = 0; s < 6; s++) {
+    const a = sweepA - s * 0.06;
+    rc.strokeStyle = `rgba(217,182,77,${0.5 * (1 - s / 6)})`; rc.lineWidth = s ? 1 : 1.4;
+    rc.beginPath(); rc.moveTo(cxr, cyr);
+    rc.lineTo(cxr + Math.cos(a) * 72, cyr + Math.sin(a) * 72); rc.stroke();
+  }
+  rc.save();
+  for (let i = blips.length - 1; i >= 0; i--) {
+    const b = blips[i], age = (now - b.born) / (b.dim ? 4000 : 9000);
+    if (age >= 1) { blips.splice(i, 1); continue; }
+    const hue = b.side === "buy" ? BUY : SELL, al = (1 - age) * (b.dim ? 0.35 : 0.95);
+    const x = cxr + Math.cos(b.ang) * b.dist * 0.6, y = cyr + Math.sin(b.ang) * b.dist * 0.6;
+    rc.shadowColor = hue; rc.shadowBlur = b.dim ? 3 : 9;
+    rc.fillStyle = rgba(hue, al);
+    rc.beginPath(); rc.arc(x, y, b.r, 0, Math.PI * 2); rc.fill();
+    if (!b.dim && age < 0.25) {                                  // ping de naissance
+      rc.strokeStyle = rgba(hue, (0.25 - age) * 3);
+      rc.beginPath(); rc.arc(x, y, b.r + age * 26, 0, Math.PI * 2); rc.stroke();
+    }
+  }
+  rc.restore();
+  rc.fillStyle = "rgba(242,234,210,.9)"; rc.font = "600 10px Segoe UI";
+  rc.fillText("G◎N", cxr - 11, cyr + 3);
+}
+
+/* ---- journal + son ------------------------------------------------------- */
+const evs = document.getElementById("evs");
+function logEv(side, usd, sym, big) {
+  const hue = side === "buy" ? BUY : SELL;
+  const row = document.createElement("div"); row.className = "ev";
+  row.innerHTML = `<i style="background:${hue}; box-shadow:0 0 6px ${hue}"></i>` +
+    `<span class="amt" style="color:${hue}">${big ? "🐋 " : ""}${(usd / 1e6).toFixed(2)}M</span>` +
+    `<span>${side === "buy" ? "ACHAT" : "VENTE"}</span><span class="sym">${sym}</span>` +
+    `<span class="tm">${new Date().toISOString().slice(11, 19)}</span>`;
+  evs.prepend(row);
+  while (evs.children.length > 6) evs.lastChild.remove();
+  let a = 1; for (const c of evs.children) { c.style.opacity = a; a *= 0.72; }
+}
+let audioOn = false, actx = null;
+document.getElementById("bSnd").onclick = (e) => {
+  audioOn = !audioOn; e.target.style.color = audioOn ? GOLD : "";
+  if (audioOn && !actx) actx = new AudioContext();
+};
+function ping(side) {
+  if (!audioOn || !actx) return;
+  const o = actx.createOscillator(), g = actx.createGain();
+  o.type = "sine"; o.frequency.value = side === "buy" ? 96 : 74;
+  g.gain.setValueAtTime(0.28, actx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + 0.9);
+  o.connect(g).connect(actx.destination); o.start(); o.stop(actx.currentTime + 0.95);
+}
+
+/* ---- simulation (rythme accelere pour la maquette) ----------------------- */
+function burst(side) {
+  const i = 130 + Math.floor(Math.random() * 25);
+  const k = candles[i], price = (k.hi + k.lo) / 2 + (Math.random() - 0.5) * 200;
+  const usd = 8e5 + Math.random() * 4e6;
+  shock(xOf(i), yOf(price), side, usd);
+  addBlip(side, usd, false);
+  logEv(side, usd, "BTCUSDT", true);
+}
+document.getElementById("bLong").onclick = () => burst("buy");
+document.getElementById("bShort").onclick = () => burst("sell");
+setInterval(() => burst(Math.random() < 0.5 ? "buy" : "sell"), 24000);          // ~0.35/h reel -> x20
+setInterval(() => {                                                              // prints P99.9 du symbole
+  const side = Math.random() < 0.5 ? "buy" : "sell", usd = 2e5 + Math.random() * 5e5;
+  addBlip(side, usd, false); logEv(side, usd, "BTCUSDT", false);
+}, 7000);
+setInterval(() => addBlip(Math.random() < 0.5 ? "buy" : "sell", 2e5, true), 1600); // ambiance all-market
+
+/* ---- boucle -------------------------------------------------------------- */
+function loop() {
+  const now = performance.now();
+  fc.clearRect(0, 0, W, H);
+  drawLevels(now); drawWaves(now); drawRadar(now);
+  requestAnimationFrame(loop);
+}
+resize();
+burst("buy");
+loop();
+</script>
+</body>
+</html>

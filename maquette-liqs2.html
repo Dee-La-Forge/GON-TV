@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>G-ON — FLUX · design travaillé</title>
+<style>
+  /* ============================================================
+     DIRECTION « FLUX » — passe de design :
+     - grille 8px, panneau lateral structure (verre fume)
+     - typographie monumentale ultra-fine, chiffres tabulaires
+     - ornements : encoches d'angle or, hairlines a point central,
+       graduations, losange d'equilibre
+     - matiere : orbes-cometes + ping de naissance, onde d'horizon
+     Charte : fluo directionnel, or, glow — AUCUN degrade.
+     ============================================================ */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --bg: #060604; --gold: #d9b64d; --hair: rgba(217,182,77,.14);
+    --hair2: rgba(217,182,77,.30);
+    --liqlong: #ff2d5e; --liqshort: #2f8bff; --mut: #7d795f; --text: #e8ecf2;
+  }
+  body { background: var(--bg); color: var(--text); overflow: hidden;
+    font-family: "Segoe UI", system-ui, sans-serif; }
+  .mono { font-family: Consolas, "Roboto Mono", monospace; }
+
+  /* ---------- topbar ---------- */
+  #topbar { height: 44px; display: flex; align-items: center; gap: 18px; padding: 0 18px;
+    border-bottom: 1px solid var(--hair); background: rgba(11,11,9,.72); }
+  .brand { color: var(--gold); font-weight: 600; letter-spacing: 3px; font-size: 14px; }
+  .brand b { text-shadow: 0 0 10px rgba(217,182,77,.6); }
+  .crumb { color: var(--mut); font-size: 10px; letter-spacing: 3px; }
+  .crumb em { color: rgba(217,182,77,.75); font-style: normal; }
+  button { background: none; border: 1px solid var(--hair); color: var(--gold);
+    font: 600 10px Consolas, monospace; letter-spacing: 1.5px; padding: 6px 14px;
+    cursor: pointer; border-radius: 2px; transition: all .15s; }
+  button:hover { border-color: var(--gold); box-shadow: 0 0 12px rgba(217,182,77,.25); }
+  button.on { background: rgba(217,182,77,.08); border-color: var(--gold); }
+
+  #waveline { position: absolute; top: 44px; left: 0; right: 0; height: 5px; display: block; }
+
+  #stage { position: relative; height: calc(100vh - 49px); }
+
+  /* ---------- chart ---------- */
+  #chart { position: absolute; inset: 16px 192px 16px 16px; overflow: hidden;
+    border: 1px solid var(--hair); border-radius: 6px; background: #07070a; }
+  #candles { position: absolute; inset: 0; }
+  .tag { position: absolute; top: 10px; left: 12px; font-size: 10px; color: var(--mut);
+    letter-spacing: 2px; }
+
+  /* ---------- panneau lateral FLUX ---------- */
+  #side { position: absolute; top: 16px; bottom: 16px; right: 16px; width: 160px;
+    display: flex; flex-direction: column;
+    background: rgba(10,10,8,.58); backdrop-filter: blur(10px);
+    border: 1px solid var(--hair); border-radius: 6px; }
+  /* encoches d'angle */
+  .notch { position: absolute; width: 7px; height: 7px; border-color: var(--hair2);
+    border-style: solid; border-width: 0; }
+  .notch.tl { top: -1px; left: -1px; border-top-width: 1px; border-left-width: 1px; }
+  .notch.tr { top: -1px; right: -1px; border-top-width: 1px; border-right-width: 1px; }
+  .notch.bl { bottom: -1px; left: -1px; border-bottom-width: 1px; border-left-width: 1px; }
+  .notch.br { bottom: -1px; right: -1px; border-bottom-width: 1px; border-right-width: 1px; }
+
+  .sideHead { padding: 10px 12px 8px; text-align: center; }
+  .sideHead .t { font-size: 9px; letter-spacing: 4px; color: var(--gold); }
+  .rule { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+  .rule::before, .rule::after { content: ""; flex: 1; height: 1px; background: var(--hair); }
+  .rule i { width: 3px; height: 3px; background: var(--hair2); transform: rotate(45deg); }
+
+  .counters { padding: 10px 12px 4px; }
+  .cnt { text-align: right; margin-bottom: 4px; }
+  .cnt .num { font-weight: 100; font-size: 40px; line-height: 1;
+    font-variant-numeric: tabular-nums; letter-spacing: 0;
+    transition: text-shadow .25s, transform .12s; display: inline-block;
+    transform-origin: right center; }
+  .cnt .unit { font-size: 15px; font-weight: 300; opacity: .7; margin-left: 4px; }
+  .cnt .cap { font-size: 8px; letter-spacing: 2.5px; margin-top: 3px; }
+  .cnt.long .num, .cnt.long .unit { color: var(--liqlong); }
+  .cnt.short .num, .cnt.short .unit { color: var(--liqshort); }
+  .cnt.long .cap { color: rgba(255,45,94,.55); }
+  .cnt.short .cap { color: rgba(47,139,255,.55); }
+  .cnt .num.hit { transform: scale(1.05); }
+
+  /* barre de dominance : deux segments plats, encoche centrale */
+  #domWrap { padding: 6px 12px 10px; }
+  #domBar { position: relative; height: 3px; background: #14130e; border-radius: 1px; }
+  #domLong  { position: absolute; left: 0; top: 0; bottom: 0; background: var(--liqlong);
+    box-shadow: 0 0 8px rgba(255,45,94,.55); border-radius: 1px 0 0 1px; }
+  #domShort { position: absolute; right: 0; top: 0; bottom: 0; background: var(--liqshort);
+    box-shadow: 0 0 8px rgba(47,139,255,.55); border-radius: 0 1px 1px 0; }
+  #domNotch { position: absolute; left: 50%; top: -3px; bottom: -3px; width: 1px;
+    background: var(--hair2); }
+  #domCap { display: flex; justify-content: space-between; font-size: 8px;
+    letter-spacing: 2px; color: var(--mut); margin-top: 6px; }
+
+  /* canal des orbes */
+  #chanWrap { flex: 1; margin: 0 12px; position: relative;
+    border-top: 1px solid var(--hair); border-bottom: 1px solid var(--hair); }
+  #flux { position: absolute; inset: 0; }
+
+  /* journal */
+  #journal { padding: 8px 12px 10px; }
+  #journal .t { font-size: 8px; letter-spacing: 3px; color: var(--mut); margin-bottom: 8px; }
+  .ev { display: flex; align-items: center; gap: 8px; font: 10px Consolas, monospace;
+    letter-spacing: .5px; color: var(--text); margin-bottom: 5px; white-space: nowrap; }
+  .ev i { width: 3px; height: 10px; flex: none; }
+  .ev .amt { font-weight: 700; min-width: 44px; }
+  .ev .who { color: var(--mut); }
+</style>
+</head>
+<body>
+  <div id="topbar">
+    <span class="brand">G<b>&#9678;</b>N</span>
+    <span class="crumb">FLUX &middot; <em>LIQUIDATIONS</em> &middot; DESIGN PASS</span>
+    <span style="flex:1"></span>
+    <button id="btnLong">&#9660; CASCADE LONGS</button>
+    <button id="btnShort">&#9650; CASCADE SHORTS</button>
+    <button id="btnAuto" class="on">AUTO</button>
+  </div>
+  <canvas id="waveline"></canvas>
+
+  <div id="stage">
+    <div id="chart">
+      <canvas id="candles"></canvas>
+      <span class="tag">BTCUSDT &middot; PERP &middot; 15M &middot; SIMULATION</span>
+    </div>
+
+    <div id="side">
+      <i class="notch tl"></i><i class="notch tr"></i><i class="notch bl"></i><i class="notch br"></i>
+
+      <div class="sideHead">
+        <div class="t">LIQUIDATIONS &middot; 15 MIN</div>
+        <div class="rule"><i></i></div>
+      </div>
+
+      <div class="counters">
+        <div class="cnt long">
+          <span class="num" id="numLong">0.0</span><span class="unit">M</span>
+          <div class="cap">&#9660; LONGS BR&Ucirc;L&Eacute;S</div>
+        </div>
+        <div class="cnt short">
+          <span class="num" id="numShort">0.0</span><span class="unit">M</span>
+          <div class="cap">&#9650; SHORTS BR&Ucirc;L&Eacute;S</div>
+        </div>
+      </div>
+
+      <div id="domWrap">
+        <div id="domBar">
+          <div id="domLong" style="width:50%"></div>
+          <div id="domShort" style="width:50%"></div>
+          <div id="domNotch"></div>
+        </div>
+        <div id="domCap"><span>DOMINANCE</span><span id="domPct">&mdash;</span></div>
+      </div>
+
+      <div id="chanWrap"><canvas id="flux"></canvas></div>
+
+      <div id="journal">
+        <div class="t">JOURNAL</div>
+        <div id="evList"></div>
+      </div>
+    </div>
+  </div>
+
+<script>
+(function () {
+  "use strict";
+  const LONG = "long", SHORT = "short";
+  const COLOR = { long: [255, 45, 94], short: [47, 139, 255] };
+  const rgba = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
+
+  /* ---- decor : faux chart ---- */
+  const cv = document.getElementById("candles"), cx = cv.getContext("2d");
+  function drawCandles() {
+    const r = cv.parentElement.getBoundingClientRect();
+    cv.width = r.width; cv.height = r.height;
+    let px = 64200;
+    const w = 7, gap = 3, n = Math.floor(r.width / (w + gap));
+    for (let i = 0; i < n; i++) {
+      const drift = Math.sin(i / 9) * 40 + (Math.random() - 0.5) * 90;
+      const o = px, c = px + drift; px = c;
+      const hi = Math.max(o, c) + Math.random() * 45, lo = Math.min(o, c) - Math.random() * 45;
+      const y = (v) => r.height * 0.62 - (v - 64200) * (r.height * 0.55) / 900;
+      const col = c >= o ? "#2fbfa4" : "#e5506b";
+      cx.strokeStyle = col; cx.fillStyle = col; cx.lineWidth = 1;
+      const x = i * (w + gap) + 4 + w / 2;
+      cx.beginPath(); cx.moveTo(x, y(hi)); cx.lineTo(x, y(lo)); cx.stroke();
+      cx.globalAlpha = 0.9; cx.fillRect(x - w / 2, Math.min(y(o), y(c)), w, Math.max(1, Math.abs(y(o) - y(c)))); cx.globalAlpha = 1;
+    }
+  }
+
+  /* ---- bus simule ---- */
+  const listeners = [];
+  const onLiq = (fn) => listeners.push(fn);
+  function emit(side, usd) { for (const fn of listeners) fn({ side, usd, at: Date.now() }); }
+  function randUsd() { return Math.exp(10.8 + Math.random() * 3.6); }
+  let auto = true;
+  (function tickAuto() {
+    if (auto && Math.random() < 0.5) emit(Math.random() < 0.5 ? LONG : SHORT, randUsd());
+    setTimeout(tickAuto, 300 + Math.random() * 900);
+  })();
+  function cascade(side) {
+    let n = 10 + Math.floor(Math.random() * 8);
+    (function burst() {
+      emit(side, randUsd() * (2 + Math.random() * 6));
+      if (--n > 0) setTimeout(burst, 60 + Math.random() * 240);
+    })();
+  }
+  document.getElementById("btnLong").onclick = () => cascade(LONG);
+  document.getElementById("btnShort").onclick = () => cascade(SHORT);
+  document.getElementById("btnAuto").onclick = function () { auto = !auto; this.classList.toggle("on", auto); };
+
+  /* ---- onde d'horizon : impulsion-comete sur hairline graduee ---- */
+  const wv = document.getElementById("waveline"), wx = wv.getContext("2d");
+  const waves = [];
+  onLiq((e) => waves.push({ side: e.side, x: -60, v: 9 + Math.log10(e.usd),
+    w: 30 + (Math.log10(e.usd) - 4) * 34 }));
+  function waveLoop() {
+    if (wv.width !== innerWidth) { wv.width = innerWidth; wv.height = 5; }
+    wx.clearRect(0, 0, wv.width, 5);
+    wx.strokeStyle = "rgba(217,182,77,.12)";
+    wx.beginPath(); wx.moveTo(0, 2.5); wx.lineTo(wv.width, 2.5); wx.stroke();
+    wx.fillStyle = "rgba(217,182,77,.25)";
+    for (let x = 60; x < wv.width; x += 120) wx.fillRect(x, 1, 1, 3);   // graduations
+    for (let i = waves.length - 1; i >= 0; i--) {
+      const p = waves[i]; p.x += p.v;
+      if (p.x - p.w > wv.width) { waves.splice(i, 1); continue; }
+      const c = COLOR[p.side];
+      // comete : 5 segments discrets d'alpha decroissant (pas de degrade)
+      for (let s = 0; s < 5; s++) {
+        const a = 0.85 * (1 - s / 5), seg = p.w / 5;
+        wx.strokeStyle = rgba(c, a); wx.lineWidth = 2.2;
+        wx.beginPath(); wx.moveTo(p.x - seg * (s + 1), 2.5); wx.lineTo(p.x - seg * s, 2.5); wx.stroke();
+      }
+      wx.save(); wx.shadowColor = rgba(c, 1); wx.shadowBlur = 8;
+      wx.fillStyle = "#fff"; wx.fillRect(p.x - 4, 1, 4, 3); wx.restore();
+    }
+    requestAnimationFrame(waveLoop);
+  }
+
+  /* ---- canal FLUX : orbes-cometes + ping de naissance + graduations ---- */
+  const fv = document.getElementById("flux"), fx = fv.getContext("2d");
+  const orbs = [], pings = [];
+  onLiq((e) => {
+    const r = Math.max(2, (Math.log10(e.usd) - 4.1) * 3.2);
+    const x = 18 + Math.random() * (fv.width - 36 || 140);
+    const y = e.side === LONG ? -r : (fv.height || 400) + r;
+    orbs.push({ side: e.side, r, x, y, py: y,
+      v: (0.8 + Math.random() * 1.3) * (e.side === LONG ? 1 : -1),
+      ph: Math.random() * Math.PI * 2 });
+    pings.push({ side: e.side, x, y: e.side === LONG ? 8 : (fv.height || 400) - 8, born: performance.now() });
+  });
+  function fluxLoop() {
+    const host = fv.parentElement.getBoundingClientRect();
+    if (fv.width !== Math.round(host.width)) { fv.width = Math.round(host.width); fv.height = Math.round(host.height); }
+    // remanence phosphore — canal nu : la matiere seule, aucun ornement
+    fx.fillStyle = "rgba(7,7,6,.15)"; fx.fillRect(0, 0, fv.width, fv.height);
+    // pings de naissance : anneau qui s'etend et s'efface
+    const now = performance.now();
+    for (let i = pings.length - 1; i >= 0; i--) {
+      const p = pings[i], age = (now - p.born) / 700;
+      if (age >= 1) { pings.splice(i, 1); continue; }
+      fx.strokeStyle = rgba(COLOR[p.side], 0.7 * (1 - age)); fx.lineWidth = 1;
+      fx.beginPath(); fx.arc(p.x, p.y, 3 + age * 16, 0, Math.PI * 2); fx.stroke();
+    }
+    // orbes-cometes
+    for (let i = orbs.length - 1; i >= 0; i--) {
+      const o = orbs[i]; o.py = o.y; o.y += o.v; o.ph += 0.045;
+      const x = o.x + Math.sin(o.ph) * 4;
+      if ((o.side === LONG && o.y - o.r > fv.height) || (o.side === SHORT && o.y + o.r < 0)) { orbs.splice(i, 1); continue; }
+      const c = COLOR[o.side];
+      fx.save();
+      fx.strokeStyle = rgba(c, 0.35); fx.lineWidth = Math.max(1, o.r * 0.8);
+      fx.beginPath(); fx.moveTo(x, o.y - o.v * 9); fx.lineTo(x, o.y); fx.stroke();   // queue
+      fx.shadowColor = rgba(c, 0.95); fx.shadowBlur = 11;
+      fx.fillStyle = rgba(c, 0.9);
+      fx.beginPath(); fx.arc(x, o.y, o.r, 0, Math.PI * 2); fx.fill();
+      fx.shadowBlur = 0; fx.fillStyle = "rgba(255,255,255,.95)";
+      fx.beginPath(); fx.arc(x, o.y - o.r * 0.2, Math.max(0.8, o.r * 0.32), 0, Math.PI * 2); fx.fill();
+      fx.restore();
+    }
+    requestAnimationFrame(fluxLoop);
+  }
+
+  /* ---- compteurs + dominance (tween doux) ---- */
+  const sums = { long: 0, short: 0 }, shown = { long: 0, short: 0 };
+  const nums = { long: document.getElementById("numLong"), short: document.getElementById("numShort") };
+  onLiq((e) => {
+    sums[e.side] += e.usd;
+    const el = nums[e.side], c = COLOR[e.side];
+    el.style.textShadow = `0 0 22px ${rgba(c, 0.8)}`;
+    el.classList.add("hit");
+    setTimeout(() => { el.style.textShadow = `0 0 6px ${rgba(c, 0.25)}`; el.classList.remove("hit"); }, 200);
+  });
+  const domLong = document.getElementById("domLong"), domShort = document.getElementById("domShort");
+  const domPct = document.getElementById("domPct");
+  setInterval(() => {
+    for (const side of [LONG, SHORT]) {
+      sums[side] *= 0.9967;
+      shown[side] += (sums[side] - shown[side]) * 0.25;   // tween
+      nums[side].textContent = (shown[side] / 1e6).toFixed(1);
+    }
+    const tot = sums.long + sums.short;
+    const pl = tot > 0 ? sums.long / tot : 0.5;
+    domLong.style.width = (pl * 50).toFixed(1) + "%";
+    domShort.style.width = ((1 - pl) * 50).toFixed(1) + "%";
+    if (tot > 50000) {
+      const side = pl >= 0.5 ? "LONGS" : "SHORTS";
+      const pct = Math.round(Math.max(pl, 1 - pl) * 100);
+      domPct.textContent = pct + "% " + side;
+      domPct.style.color = pl >= 0.5 ? "rgba(255,45,94,.8)" : "rgba(47,139,255,.8)";
+    }
+  }, 120);
+
+  /* ---- journal : 4 derniers evenements > 500k ---- */
+  const evList = document.getElementById("evList");
+  onLiq((e) => {
+    if (e.usd < 500000) return;
+    const c = e.side === LONG ? "var(--liqlong)" : "var(--liqshort)";
+    const row = document.createElement("div");
+    row.className = "ev";
+    const t = new Date(e.at).toTimeString().slice(0, 5);
+    row.innerHTML = `<i style="background:${c}; box-shadow:0 0 6px ${c}"></i>` +
+      `<span class="amt" style="color:${c}">${(e.usd / 1e6).toFixed(2)}M</span>` +
+      `<span class="who">${e.side === LONG ? "LONGS" : "SHORTS"}</span>` +
+      `<span style="flex:1"></span><span class="who">${t}</span>`;
+    evList.prepend(row);
+    while (evList.children.length > 4) evList.lastChild.remove();
+    let a = 1;
+    for (const child of evList.children) { child.style.opacity = a; a *= 0.65; }
+  });
+
+  drawCandles();
+  window.addEventListener("resize", drawCandles);
+  waveLoop(); fluxLoop();
+})();
+</script>
+</body>
+</html>
