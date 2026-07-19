@@ -76,10 +76,14 @@
       lastKlinesAt = Date.now(); lastFetchRange = { from, to };
       let lo = Infinity, hi = -Infinity;
       for (const k of rows) { lo = Math.min(lo, +k[3]); hi = Math.max(hi, +k[2]); }
-      // bin d'AFFICHAGE : ~90 lignes sur le range visible
+      // bin d'AFFICHAGE ~90 lignes, quantifie sur l'echelle 1/2/5 et avec
+      // HYSTERESIS : on ne change de bin que si l'ecart depasse ~2x — sinon
+      // chaque refetch reshufflait toutes les barres (profil "instable").
       const raw = (hi - lo) / 90;
       const mag = Math.pow(10, Math.floor(Math.log10(raw)));
-      binSize = Math.max(mag, Math.round(raw / mag) * mag);
+      let target = 10 * mag;
+      for (const m of [1, 2, 5]) if (raw <= m * mag) { target = m * mag; break; }
+      if (!(binSize > 0) || target > binSize * 1.9 || target < binSize / 1.9) binSize = target;
       const prof = new Map(), pts = [];
       let cum = 0;
       for (const k of rows) {
@@ -164,36 +168,44 @@
     const dy = chartTop - host.top;
     const innerR = w - 12, maxW = w - 70;
 
-    // --- profil
-    if (profile.size && profMax > 0 && pocBin != null) {
-      // hauteur d'une ligne = distance ecran entre deux bins AU PRIX du POC
-      const pPoc = pocBin * binSize;
-      const yA = gon.priceToY(pPoc), yB = gon.priceToY(pPoc + binSize);
-      const hBar = yA != null && yB != null ? Math.max(1.5, Math.abs(yA - yB) * 0.78) : 3;
+    // --- profil (geometrie PAR BARRE depuis les bords exacts du bin :
+    // stable sous n'importe quel rescale de la barre des prix — plus aucun
+    // fallback global qui faisait sauter toutes les barres quand le POC
+    // sortait de l'ecran)
+    if (profile.size && profMax > 0) {
+      const bars = [];
       for (const [b, e] of profile) {
-        const yC = gon.priceToY(b * binSize + binSize / 2);
-        if (yC == null || !isFinite(yC)) continue;
-        const y = yC + dy;
-        if (y < 30 || y > h - 8) continue;
+        const y0 = gon.priceToY(b * binSize), y1 = gon.priceToY((b + 1) * binSize);
+        if (y0 == null || y1 == null || !isFinite(y0) || !isFinite(y1)) continue;
+        const hh = Math.max(1.2, Math.abs(y0 - y1) * 0.82);
+        const yTop = Math.min(y0, y1) + dy + Math.abs(y0 - y1) * 0.09;
+        if (yTop + hh < 30 || yTop > h - 8) continue;
         const wBar = e.vol / profMax * maxW;
-        const wBuy = wBar * Math.max(0, Math.min(1, e.buy / e.vol));
-        // FLUO : alpha eleve + glow directionnel par barre (demande Meddy)
-        cxPanel.save();
-        cxPanel.shadowColor = BUY; cxPanel.shadowBlur = b === pocBin ? 10 : 5;
-        cxPanel.fillStyle = rgba(BUY, b === pocBin ? 0.9 : 0.5);
-        cxPanel.fillRect(innerR - wBar, y - hBar / 2, wBuy, hBar);
-        cxPanel.shadowColor = SELL;
-        cxPanel.fillStyle = rgba(SELL, b === pocBin ? 0.9 : 0.5);
-        cxPanel.fillRect(innerR - wBar + wBuy, y - hBar / 2, wBar - wBuy, hBar);
-        cxPanel.restore();
-        if (b === pocBin) {
-          const pulse = 0.75 + 0.25 * Math.sin(now * 0.004);
-          cxPanel.save(); cxPanel.shadowColor = GOLD; cxPanel.shadowBlur = 8 * pulse;
-          cxPanel.strokeStyle = `rgba(255,255,255,${0.8 * pulse})`; cxPanel.lineWidth = 0.7;
-          cxPanel.strokeRect(innerR - wBar, y - hBar / 2, wBar, hBar); cxPanel.restore();
-          cxPanel.fillStyle = GOLD; cxPanel.font = "600 9px Segoe UI";
-          cxPanel.fillText("POC", innerR - wBar - 26, y + 3);
-        }
+        bars.push({ b, yTop, hh, wBar, wBuy: wBar * Math.max(0, Math.min(1, e.buy / e.vol)) });
+      }
+      // glow UNE fois par passe de couleur (pas par barre) et seulement si
+      // les lignes sont assez hautes — fluide pendant le drag de l'axe
+      const glow = bars.length > 0 && bars[0].hh >= 2.5;
+      cxPanel.save();
+      if (glow) { cxPanel.shadowColor = BUY; cxPanel.shadowBlur = 5; }
+      for (const bar of bars) {
+        cxPanel.fillStyle = rgba(BUY, bar.b === pocBin ? 0.9 : 0.5);
+        cxPanel.fillRect(innerR - bar.wBar, bar.yTop, bar.wBuy, bar.hh);
+      }
+      if (glow) cxPanel.shadowColor = SELL;
+      for (const bar of bars) {
+        cxPanel.fillStyle = rgba(SELL, bar.b === pocBin ? 0.9 : 0.5);
+        cxPanel.fillRect(innerR - bar.wBar + bar.wBuy, bar.yTop, bar.wBar - bar.wBuy, bar.hh);
+      }
+      cxPanel.restore();
+      const poc = bars.find((bar) => bar.b === pocBin);
+      if (poc) {
+        const pulse = 0.75 + 0.25 * Math.sin(now * 0.004);
+        cxPanel.save(); cxPanel.shadowColor = GOLD; cxPanel.shadowBlur = 8 * pulse;
+        cxPanel.strokeStyle = `rgba(255,255,255,${0.8 * pulse})`; cxPanel.lineWidth = 0.7;
+        cxPanel.strokeRect(innerR - poc.wBar, poc.yTop, poc.wBar, poc.hh); cxPanel.restore();
+        cxPanel.fillStyle = GOLD; cxPanel.font = "600 9px Segoe UI";
+        cxPanel.fillText("POC", innerR - poc.wBar - 26, poc.yTop + poc.hh / 2 + 3);
       }
     }
 
