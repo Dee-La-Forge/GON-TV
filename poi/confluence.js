@@ -362,7 +362,7 @@
       #gonLiqVideo.gonCinema { position:absolute; inset:0; z-index:8; width:100% !important;
         height:100%; aspect-ratio:auto; margin:0 !important; border:none; border-radius:0;
         background:#000; }
-      #gonLiqVideo.gonCinema video { object-fit:contain; }
+      #gonLiqVideo.gonCinema video { object-fit:cover; }
       #gonVidSwap { position:absolute; left:8px; bottom:9px; z-index:9; background:rgba(10,10,8,.6);
         color:#d9b64d; border:1px solid #232635; font-size:12px; line-height:1;
         padding:2px 7px; cursor:pointer; pointer-events:auto; }
