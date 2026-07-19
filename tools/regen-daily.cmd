@@ -21,6 +21,21 @@ for %%S in (%SYMBOLS%) do (
 rem verdicts de la regle de retest (BTC seulement : pourcentages calibres BTC)
 call :step "outcome BTCUSDT" node backfill-outcome.js BTCUSDT
 
+rem PUBLICATION : commit + push des archives regenerees vers GitHub, sinon
+rem github.io reste gele au dernier push et il manque des niveaux recents.
+rem On ne pousse QUE les fichiers d'archive (donnees), jamais le code.
+echo [%date% %time%] --- publication github --- >> "%LOG%"
+cd /d "%~dp0\..\.."
+git add g-on/poi/antho-v1-m15-pois.json g-on/poi/archive-*-m15.json >> "%LOG%" 2>&1
+git diff --cached --quiet
+if errorlevel 1 (
+  git commit -m "chore(g-on): archives POI quotidiennes" >> "%LOG%" 2>&1
+  git push >> "%LOG%" 2>&1
+  echo [%date% %time%] publication exit %errorlevel% >> "%LOG%"
+) else (
+  echo [%date% %time%] aucune archive modifiee, rien a publier >> "%LOG%"
+)
+
 echo [%date% %time%] ===== fin (worst=%WORST%) ===== >> "%LOG%"
 exit /b %WORST%
 
