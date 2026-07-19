@@ -611,7 +611,7 @@ const chart = LWC.createChart($('chart'), {
     horzLine: { color: GOLD_D, style: LWC.LineStyle.Dashed, labelBackgroundColor: '#26200e' },
   },
   rightPriceScale: { borderColor: '#26200e', scaleMargins: { top: .08, bottom: .22 } },
-  timeScale: { borderColor: '#26200e', timeVisible: true, rightOffset: 6 },
+  timeScale: { borderColor: '#26200e', timeVisible: true, rightOffset: 6 },   // remplace par la marge 20 % (applyLiveOffset) apres le 1er cadrage
 });
 const series = chart.addSeries(LWC.CandlestickSeries, {
   upColor: GOLD, downColor: '#111009',
@@ -973,13 +973,35 @@ async function fillGap() {
   } catch {} finally { gapFilling = false; }
 }
 
+/* MARGE LIVE : 20 % de la largeur reste VIDE a droite du direct. rightOffset
+   (en bougies) est la marge que LWC maintient en decalant la vue vers la
+   gauche a CHAQUE nouvelle bougie — la derniere bougie reste a ~80 % de la
+   largeur. Recalcule en bougies car il depend du zoom (barSpacing). */
+const LIVE_RIGHT_FRAC = 0.20;
+function liveRightBars() {
+  const bs = ts().options().barSpacing || 6;
+  return Math.max(2, Math.round(LIVE_RIGHT_FRAC * paneW() / bs));
+}
+function followingLive() {
+  try { const lr = ts().getVisibleLogicalRange(), n = dataNow().length;
+    return !!(lr && n && lr.to >= n - 2); } catch { return false; }
+}
+/* applique la marge 20 % comme rightOffset LWC (auto-suivi des nouvelles
+   bougies). Guarde par followingLive : ne jamais rejeter la vue de qqn qui
+   etudie l'historique (applyOptions rightOffset deplacerait sa fenetre). */
+function applyLiveOffset(force) {
+  if (!force && !followingLive()) return;
+  try { ts().applyOptions({ rightOffset: liveRightBars() }); } catch {}
+}
 /* positionnement INSTANTANÉ au bord droit : scrollToRealTime anime via rAF
    (gelé fenêtre occluse, interminable depuis l'historique) → jamais fiable ici */
 function snapToLive() {
   const n = dataNow().length;
   if (!n) return;
+  const off = liveRightBars();
+  applyLiveOffset(true);   // arme le suivi auto avec la marge 20 %
   const bars = Math.max(20, paneW() / (ts().options().barSpacing || 6));
-  ts().setVisibleLogicalRange({ from: n - 1 + 6 - bars, to: n - 1 + 6 });
+  ts().setVisibleLogicalRange({ from: n - 1 + off - bars, to: n - 1 + off });
 }
 let loading = false, retryTimer = null;
 let keepRange = null;   // fenêtre temporelle à préserver à travers un changement de TF (posée par le clic TF)
@@ -1433,6 +1455,7 @@ function sizeCv() {
   cv.width = r.width * dpr; cv.height = r.height * dpr;
   cv.style.width = r.width + 'px'; cv.style.height = r.height + 'px';
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  applyLiveOffset();   // marge 20 % en bougies : depend de la largeur -> recalcul au resize (si on suit le direct)
   invalidate();
 }
 /* RO peut ne jamais délivrer selon l'environnement : triple ceinture
