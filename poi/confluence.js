@@ -351,6 +351,13 @@
     }
     if (ws && ws.readyState === 1 && lastMsgAt && Date.now() - lastMsgAt > STALL_MS) ws.close();
     if (shown()) rebuildFromKlines();
+    // la video a ete sortie du panneau FLUX : elle doit suivre le toggle ≋
+    // (sinon elle reste visible quand l'utilisateur masque les liquidations)
+    const liq = document.getElementById("gonLiqPanel"), vid = document.getElementById("gonLiqVideo");
+    if (liq && vid && !vid.classList.contains("gonCinema")) {
+      const liqHidden = liq.style.display === "none";
+      vid.style.display = liqHidden ? "none" : "";
+    }
   }
 
   /* ---------- construction ---------- */
@@ -399,6 +406,12 @@
       #gonVidSwap:hover { border-color:#d9b64d; }
       /* en plein ecran, le bouton de retour passe EN HAUT A GAUCHE */
       #gonLiqVideo.gonCinema #gonVidSwap { top:10px; left:10px; bottom:auto; font-size:14px; }
+      /* cinema : la video opaque couvre le chart -> masquer les overlays
+         (leurs rAF s'arretent, et le sonar se tait car shown()=false) */
+      .gonCinemaActive > #poiOverlay,
+      .gonCinemaActive > #gonWhaleCv,
+      .gonCinemaActive > #gonWhaleRadar,
+      .gonCinemaActive > #gonConflCvd { display:none !important; }
     `;
     document.head.appendChild(css);
 
@@ -410,10 +423,14 @@
     gon.mount.parentElement.insertBefore(panel, gon.mount.nextSibling);
     // puis restructuration : les deux panneaux cote a cote dans une colonne,
     // l'ecran video (celui du panneau FLUX) descend SOUS les deux.
-    (function mountRightColumn() {
+    (function mountRightColumn(tries) {
       const liq = document.getElementById("gonLiqPanel");
       const vid = document.getElementById("gonLiqVideo");
-      if (!liq || !vid) { setTimeout(mountRightColumn, 500); return; }
+      if (!liq || !vid) {
+        if (tries > 0) setTimeout(() => mountRightColumn(tries - 1), 500);
+        // liq-flux absent : le panneau confluence reste frere du chart (ok)
+        return;
+      }
       const parent = liq.parentElement;
       const col = document.createElement("div"); col.id = "gonRightCol";
       const row = document.createElement("div"); row.id = "gonRightRow";
@@ -431,15 +448,17 @@
         cinema = !cinema;
         if (cinema) {
           gon.mount.appendChild(vid); vid.classList.add("gonCinema");
+          gon.mount.classList.add("gonCinemaActive");   // masque les overlays
           // en grand ecran, les panneaux de droite sont MASQUES : le film
           // prend toute la largeur, retour a l'identique au re-clic
           col.style.display = "none";
         } else {
           vid.classList.remove("gonCinema"); col.appendChild(vid);
+          gon.mount.classList.remove("gonCinemaActive");
           col.style.display = "";
         }
       };
-    })();
+    })(20);
 
     cvCvd = document.createElement("canvas"); cvCvd.id = "gonConflCvd";
     cxCvd = cvCvd.getContext("2d");

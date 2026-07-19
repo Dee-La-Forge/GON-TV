@@ -15,7 +15,7 @@ const fs = require("fs");
 const path = require("path");
 const { acquire, writeArchiveAtomic } = require("./lock");
 const { politeFetch } = require("./http");
-const SL_PCT = 0.0015, TP_PCT = 0.01, MAX_HOLD_MS = 7 * 24 * 3600e3;
+const SL_PCT = 0.0015, TP_PCT = 0.01, MAX_HOLD_MS = 7 * 24 * 3600e3, TF = 15 * 60 * 1000;
 const SYMBOL = (process.argv[2] || "BTCUSDT").toUpperCase();
 const ARCHIVE_PATH = path.join(__dirname, "..", "poi",
   SYMBOL === "BTCUSDT" ? "antho-v1-m15-pois.json" : `archive-${SYMBOL}-m15.json`);
@@ -73,10 +73,14 @@ async function fetch1m(startMs, endMs) {
     // l'histoire 1m chaque jour, a perpetuite.
     if (!(entry > 0)) { r[IDX.win] = -1; continue; }
     const sl = entry * (1 - dir * SL_PCT), tp = entry * (1 + dir * TP_PCT);
+    const bucketStart = Math.floor(tTouch / TF) * TF;
     const i0 = idxAt.get(floor1m(tTouch));
     if (i0 == null) { r[IDX.win] = -1; continue; }
+    // Fenetre du touch bornee par le TEMPS (la bougie M15 du retest), pas par
+    // un compte d'index : une lacune de 1m ne fait plus deborder la recherche
+    // sur la bougie 15m suivante -> verdict sur le bon contexte.
     let started = -1;
-    for (let k = i0; k < Math.min(i0 + 15, m1.length); k++) {
+    for (let k = i0; k < m1.length && m1[k].t < bucketStart + TF; k++) {
       if (m1[k].l <= entry && m1[k].h >= entry) { started = k; break; }
     }
     if (started < 0) { r[IDX.win] = -1; continue; }

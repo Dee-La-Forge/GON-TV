@@ -522,6 +522,9 @@
     // dans toutes les vues, independant des filtres score/climax.
     const WIN_GOLD = "#d9b64d";
     function drawWins(plotW, paneH, pLo, pHi, vis, now) {
+      // En REPLAY, le ✦ (verdict resolu des heures APRES le touch) est une
+      // info future : on ne l'affiche pas pendant un entrainement.
+      if (gon.replay) return;
       // 1re passe : collecter UNIQUEMENT les ✦ reellement dessinables (x/y
       // finis) — le compteur ne doit annoncer que ce qui est a l'ecran, et
       // les perdus dessinables comptent pour le %.

@@ -2520,6 +2520,7 @@ window.__gon = {
   get tf() { return tf; },
   get tfSec() { return tfDef().sec; },
   get theme() { return theme; },
+  get replay() { return !!replay; },   // les modules masquent les infos "futures" (verdicts ✦) en replay
   priceToY: p => series.priceToCoordinate(p),
   timeToX: xOf,
   mount: $('chartwrap'),
@@ -2556,10 +2557,10 @@ load();
 <script src="poi/poi-detector.js?v=3"></script>
 <script src="poi/poi-lifecycle.js?v=5"></script>
 <script src="poi/stream.js?v=1"></script>
-<script src="poi/poi-render.js?v=31"></script>
-<script src="poi/poi-feature.js?v=31"></script>
+<script src="poi/poi-render.js?v=32"></script>
+<script src="poi/poi-feature.js?v=32"></script>
 <script src="poi/liq-flux.js?v=20"></script>
-<script src="poi/whale-sonar.js?v=24"></script>
-<script src="poi/confluence.js?v=20"></script>
+<script src="poi/whale-sonar.js?v=25"></script>
+<script src="poi/confluence.js?v=21"></script>
 </body>
 </html>

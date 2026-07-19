@@ -273,8 +273,15 @@ function skeleton(startMs) {
   const retestOf = (p) => (p.status === "ACTIVE_UNTOUCHED" ? null : (p.firstTouchTs ?? p.statusChangedTs ?? null));
   const oldRows = agedOld.map((p) => {
     const row = p.row.slice();
-    row[IDX.status] = statusChar(p);
-    row[IDX.retestTs] = statusChar(p) === "A" ? p.row[IDX.retestTs] : (retestOf(p) ?? p.row[IDX.retestTs]);
+    const sc = statusChar(p);
+    row[IDX.status] = sc;
+    row[IDX.retestTs] = sc === "A" ? p.row[IDX.retestTs] : (retestOf(p) ?? p.row[IDX.retestTs]);
+    // Un verdict `win` ne vaut QUE pour une ligne encore "T" (retest servi) :
+    // si un retest est ensuite re-vieilli en "I" (cluster casse apres coup),
+    // son verdict n'a plus de sens -> null, pour ne pas polluer les stats.
+    if ("win" in IDX && sc !== "T" && row[IDX.win] !== null && row[IDX.win] !== undefined) {
+      row[IDX.win] = null;
+    }
     return row;
   });
   const newRows = agedNew.map((p) => {

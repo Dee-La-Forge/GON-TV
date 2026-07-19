@@ -72,6 +72,9 @@
 
   /* ---------- detection ---------- */
   function onTrade(sym, price, qty, maker, T) {
+    // synchro immediate : sans elle, jusqu'a 2s (slowTick) de trades de
+    // l'ANCIEN symbole etaient traites comme courants (journal/burst faux).
+    if (gon.symbol && gon.symbol !== curSymbol) syncSymbol();
     const st = stats[sym];
     if (!st || !(price > 0) || !(qty > 0)) return;
     const n = price * qty, now = Date.now();
@@ -105,6 +108,8 @@
   }
 
   function burst(side, price, T, usd) {
+    ping(side);                       // le son part meme onglet cache
+    if (!shown()) return;             // pas de visuel accumule si rAF gele
     const tSec = T / 1000, now = performance.now();
     waves.push({ tSec, price, side, born: now });
     scars.push({ tSec, side, born: now });
@@ -123,7 +128,6 @@
     }
     addBlip(side, usd * 4, false, true);   // silent : le burst a son propre ping grave
     journal(side, true);
-    ping(side);
   }
 
   /* ---------- amorcage REST des seuils (demarrage a froid) ---------- */
@@ -355,7 +359,6 @@
     drawSurges(now, plotW);
     drawWaves(now, plotW);
     drawRadar(now);
-    if (Date.now() - lastThrSaveAt > 60000) { lastThrSaveAt = Date.now(); saveThr(); }
   }
 
   function applyVisible() {
@@ -377,13 +380,16 @@
   }
 
   /* ---------- tick lent ---------- */
+  function syncSymbol() {
+    curSymbol = gon.symbol;
+    waves.length = 0; scars.length = 0; surges.length = 0;
+    if (journalEl) journalEl.textContent = "";
+  }
   function slowTick() {
-    if (gon.symbol && gon.symbol !== curSymbol) {
-      curSymbol = gon.symbol;
-      waves.length = 0; scars.length = 0; surges.length = 0;
-      if (journalEl) journalEl.textContent = "";
-    }
+    if (gon.symbol && gon.symbol !== curSymbol) syncSymbol();
     if (ws && ws.readyState === 1 && lastMsgAt && Date.now() - lastMsgAt > STALL_MS) ws.close();
+    // persistance des seuils hors rAF : survit au sonar masque / onglet cache
+    if (Date.now() - lastThrSaveAt > 60000) { lastThrSaveAt = Date.now(); saveThr(); }
   }
 
   /* ---------- construction ---------- */

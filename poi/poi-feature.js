@@ -125,12 +125,13 @@
         lifecycleValidAfterTs, provenance: "antho_v1_canonical",
         climax: index.climax != null ? row[index.climax] === 1 : false,
         // Verdict de la regle de retest (SL 0.15% / TP 1%, backfill-outcome) :
-        // 1 = valide (✦), 0 = perdu, null = actif / non juge / trop recent.
+        // 1 = valide (✦), 0 = perdu, -1 = non eligible/non resolu (exclu),
+        // null = actif / non juge / touch trop recent.
         win: index.win != null && row[index.win] !== null && row[index.win] !== undefined
           ? Number(row[index.win]) : null,
         // Profil d'approche avant premier touch (champ de recherche, pas d'UI) :
         // distance min en ATR ; -1 = retest immediat ; null = non calcule/actif.
-        approachAtr: index.approachAtr != null && row[index.approachAtr] !== null
+        approachAtr: index.approachAtr != null && row[index.approachAtr] !== null && row[index.approachAtr] !== undefined
           ? Number(row[index.approachAtr]) : null
       };
     }).filter((p) => Number.isFinite(p.createdTs) && Number.isFinite(p.zoneLow) && Number.isFinite(p.zoneHigh) && p.zoneHigh > p.zoneLow);
@@ -255,7 +256,22 @@
       const pruned = {};
       for (const [k, v] of Object.entries(entries)) if (Number(k) >= minTs) pruned[k] = v;
       localStorage.setItem(poiBootCacheKey(ticker), JSON.stringify({ version: 2, binSize: poiConfig.binSize, entries: pruned }));
-    } catch (_) {}
+    } catch (error) {
+      // quota plein (20 bootcaches x plusieurs symboles + dessins G-Bot) : on
+      // libere les bootcaches des AUTRES symboles avant de re-tenter — sinon
+      // chaque rechargement re-telechargeait tout le bootstrap (cf. 429).
+      if (error && error.name === "QuotaExceededError") {
+        try {
+          for (let i = localStorage.length - 1; i >= 0; i--) {
+            const key = localStorage.key(i);
+            if (key && key.startsWith("gon.poi.bootcache.") && key !== poiBootCacheKey(ticker)) {
+              localStorage.removeItem(key);
+            }
+          }
+          localStorage.setItem(poiBootCacheKey(ticker), JSON.stringify({ version: 2, binSize: poiConfig.binSize, entries: {} }));
+        } catch (_) {}
+      }
+    }
   }
 
   async function bootstrapRecentPois(ticker, id, signal) {
@@ -652,6 +668,7 @@
       viewMode = localStorage.getItem(VIEW_KEY)
         || (localStorage.getItem("gon.poi.showConsumed") === "1" ? "all" : "live");   // migration
       if (!VIEW_CYCLE.includes(viewMode)) viewMode = "live";
+      localStorage.removeItem("gon.poi.showConsumed");   // cle de migration morte : nettoyee une fois lue
     } catch (_) {}
     const SCORE_KEY = "gon.poi.minScore";
     // Defaut ELEGANT : seuls les niveaux d'importance moyenne+ (S>=50) — la
