@@ -335,7 +335,7 @@
   function applyVisible() {
     panel.style.display = visible ? "block" : "none";
     cvCvd.style.display = visible ? "block" : "none";
-    btn.classList.toggle("on", visible);
+    if (btn) btn.classList.toggle("on", visible);
     if (!visible) { if (rafId) { cancelAnimationFrame(rafId); rafId = 0; } }
     else if (!rafId) rafId = requestAnimationFrame(loop);
   }
@@ -464,23 +464,11 @@
     cxCvd = cvCvd.getContext("2d");
     gon.mount.appendChild(cvCvd);
 
-    btn = document.createElement("button");
-    btn.id = "gonConflBtn"; btn.title = "Carnet & profil + CVD"; btn.textContent = "▮︎";
-    // #gonPoiCtl est cree par poi-feature (setTimeout 0) APRES ce boot
-    // (DOMContentLoaded) : attendre le groupe POI pour ne pas atterrir en
-    // bout de topbar apres le prix.
-    (function mountBtn(tries) {
-      const host = document.getElementById("gonPoiCtl");
-      if (host) { host.appendChild(btn); return; }
-      if (tries > 0) { setTimeout(() => mountBtn(tries - 1), 300); return; }
-      const tb = document.getElementById("topbar"); if (tb) tb.appendChild(btn);
-    })(20);
-    try { visible = localStorage.getItem(ON_KEY) !== "0"; } catch (_) {}
-    btn.onclick = () => {
-      visible = !visible;
-      try { localStorage.setItem(ON_KEY, visible ? "1" : "0"); } catch (_) {}
-      applyVisible();
-    };
+    // Pas de bouton de bascule (demande Meddy) : le panneau reste toujours
+    // affiche (la media query <1100px le masque seule). On purge un eventuel
+    // etat "masque" herite de l'ancien toggle.
+    visible = true;
+    try { localStorage.removeItem(ON_KEY); } catch (_) {}
 
     applyVisible();
     connect();

@@ -221,7 +221,7 @@
   function applyVisible() {
     panel.style.display = visible ? "flex" : "none";
     waveCv.style.display = visible ? "block" : "none";
-    btn.classList.toggle("on", visible);
+    if (btn) btn.classList.toggle("on", visible);
     // rAF suspendu quand le panneau est masque : la boucle ne tournait que
     // pour tester un booleen 60x/s (batterie). Le WS reste connecte : la
     // fenetre 15 min et le journal restent chauds pour le re-affichage.
@@ -358,18 +358,10 @@
     evList = document.getElementById("gonLiqEvList");
     symEl = document.getElementById("gonLiqSym");
 
-    // picto topbar (rejoint le groupe POI existant)
-    btn = document.createElement("button");
-    btn.id = "gonLiqBtn"; btn.className = "gp-toggle";
-    btn.title = "Flux de liquidations"; btn.textContent = "≋";
-    const host = document.getElementById("gonPoiCtl") || document.getElementById("topbar");
-    if (host) host.appendChild(btn);
-    try { visible = localStorage.getItem(ON_KEY) !== "0"; } catch (_) {}
-    btn.onclick = () => {
-      visible = !visible;
-      try { localStorage.setItem(ON_KEY, visible ? "1" : "0"); } catch (_) {}
-      applyVisible();
-    };
+    // Pas de bouton de bascule (demande Meddy) : le panneau reste toujours
+    // affiche (la media query <860px le masque seule). Purge de l'etat herite.
+    visible = true;
+    try { localStorage.removeItem(ON_KEY); } catch (_) {}
 
     // son de la video : bouton mute + curseur de volume (persiste). Chrome
     // exige un geste utilisateur pour l'audio — clic et drag en sont.
