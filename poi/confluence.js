@@ -354,7 +354,7 @@
          en socle pleine largeur, format bandeau cinema (21:9, cover) */
       #gonRightRow > #gonLiqPanel { flex:0 0 225px; }
       #gonRightCol > #gonLiqVideo { margin:0 8px 8px 0; align-self:stretch; width:auto;
-        aspect-ratio:21/9; border-radius:6px; overflow:hidden;
+        aspect-ratio:28/9; border-radius:6px; overflow:hidden;
         border:1px solid rgba(217,182,77,.14); }
     `;
     document.head.appendChild(css);
