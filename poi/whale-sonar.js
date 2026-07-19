@@ -260,7 +260,10 @@
     for (const rr of [54, R_MAX]) {
       radarCx.beginPath(); radarCx.arc(cxr, cyr, rr, 0, Math.PI * 2); radarCx.stroke();
     }
+    // BIP sonar : un ping doux a chaque tour complet du balayage
+    const prevTurn = Math.floor(sweepA / (Math.PI * 2));
     sweepA += 0.014;
+    if (Math.floor(sweepA / (Math.PI * 2)) !== prevTurn) sonarTick();
     for (let s = 0; s < 6; s++) {
       const a = sweepA - s * 0.06;
       radarCx.strokeStyle = `rgba(217,182,77,${0.5 * (1 - s / 6)})`;
@@ -294,6 +297,18 @@
     if (armed) return; armed = true;
     try { actx = new AudioContext(); } catch (_) {}
   }
+  // ping ambiant du balayage : bref, aigu, tres doux (sous-marin)
+  function sonarTick() {
+    if (muted || !actx || !shown()) return;
+    if (actx.state === "suspended") { actx.resume().catch(() => {}); }
+    const o = actx.createOscillator(), g = actx.createGain();
+    o.type = "sine"; o.frequency.setValueAtTime(920, actx.currentTime);
+    o.frequency.exponentialRampToValueAtTime(640, actx.currentTime + 0.45);
+    g.gain.setValueAtTime(0.05, actx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.0004, actx.currentTime + 0.5);
+    o.connect(g).connect(actx.destination); o.start(); o.stop(actx.currentTime + 0.55);
+  }
+
   function ping(side) {
     if (muted || !actx) return;
     if (actx.state === "suspended") { actx.resume().catch(() => {}); }

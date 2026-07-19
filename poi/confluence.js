@@ -177,10 +177,15 @@
         if (y < 30 || y > h - 8) continue;
         const wBar = e.vol / profMax * maxW;
         const wBuy = wBar * Math.max(0, Math.min(1, e.buy / e.vol));
-        cxPanel.fillStyle = rgba(BUY, b === pocBin ? 0.55 : 0.22);
+        // FLUO : alpha eleve + glow directionnel par barre (demande Meddy)
+        cxPanel.save();
+        cxPanel.shadowColor = BUY; cxPanel.shadowBlur = b === pocBin ? 10 : 5;
+        cxPanel.fillStyle = rgba(BUY, b === pocBin ? 0.9 : 0.5);
         cxPanel.fillRect(innerR - wBar, y - hBar / 2, wBuy, hBar);
-        cxPanel.fillStyle = rgba(SELL, b === pocBin ? 0.55 : 0.22);
+        cxPanel.shadowColor = SELL;
+        cxPanel.fillStyle = rgba(SELL, b === pocBin ? 0.9 : 0.5);
         cxPanel.fillRect(innerR - wBar + wBuy, y - hBar / 2, wBar - wBuy, hBar);
+        cxPanel.restore();
         if (b === pocBin) {
           const pulse = 0.75 + 0.25 * Math.sin(now * 0.004);
           cxPanel.save(); cxPanel.shadowColor = GOLD; cxPanel.shadowBlur = 8 * pulse;
@@ -341,6 +346,12 @@
       #gonConflBtn:hover { border-color:#d9b64d; }
       #gonConflBtn.on { opacity:1; text-shadow:0 0 8px rgba(217,182,77,.6); }
       @media (max-width: 1100px) { #gonConflPanel { display:none !important; } }
+      /* colonne de droite : [profil | liquidations] puis l'ECRAN video
+         pleine largeur en dessous des deux panneaux */
+      #gonRightCol { display:flex; flex-direction:column; min-height:0; }
+      #gonRightRow { display:flex; flex:1 1 auto; min-height:0; }
+      #gonRightCol > #gonLiqVideo { margin:0 8px 8px 0; border-radius:6px; overflow:hidden;
+        border:1px solid rgba(217,182,77,.14); }
     `;
     document.head.appendChild(css);
 
@@ -350,6 +361,20 @@
     panel.appendChild(cvPanel); cxPanel = cvPanel.getContext("2d");
     // colonne entre le chart et le panneau FLUX (soeur de flex)
     gon.mount.parentElement.insertBefore(panel, gon.mount.nextSibling);
+    // puis restructuration : les deux panneaux cote a cote dans une colonne,
+    // l'ecran video (celui du panneau FLUX) descend SOUS les deux.
+    (function mountRightColumn() {
+      const liq = document.getElementById("gonLiqPanel");
+      const vid = document.getElementById("gonLiqVideo");
+      if (!liq || !vid) { setTimeout(mountRightColumn, 500); return; }
+      const parent = liq.parentElement;
+      const col = document.createElement("div"); col.id = "gonRightCol";
+      const row = document.createElement("div"); row.id = "gonRightRow";
+      parent.insertBefore(col, liq);
+      col.appendChild(row);
+      row.appendChild(panel); row.appendChild(liq);
+      col.appendChild(vid);
+    })();
 
     cvCvd = document.createElement("canvas"); cvCvd.id = "gonConflCvd";
     cxCvd = cvCvd.getContext("2d");
