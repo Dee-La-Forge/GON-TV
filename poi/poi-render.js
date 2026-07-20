@@ -213,7 +213,6 @@
       if (x1 == null || !isFinite(x1)) return null;
 
       const active = poi.status === "ACTIVE_UNTOUCHED";
-      const touched = poi.status === "TOUCHED";
       const endMs = active ? now : (poi.firstTouchTs ?? poi.statusChangedTs ?? now);
       let x2 = active ? plotW : gon.timeToX(snapToBarSec(endMs));
       if (x2 == null || !isFinite(x2)) x2 = plotW;
@@ -223,16 +222,20 @@
 
       const hue = HUE[poi.direction] || HUE.long;
       const y = yEntry != null ? yEntry : yOpp;
-      const lineAlpha = active ? ALPHA.lineActive : touched ? ALPHA.lineTouched : T.lineDeadAlpha;
-      const width = active ? W.active : touched ? W.touched : W.dead;
-      const dash = active ? DASH.active : touched ? DASH.touched : DASH.dead;
-      // Laser : plein feu sur les actifs, discret sur les touches, eteint sur
-      // les morts. Le laser reste DIRECTIONNEL (bleu/rouge) pour tous — les
-      // elites (S>=90) tirent un fluo PLUS INTENSE (pas d'or sur la ligne :
-      // lisibilite long/short d'abord) ; leur or vit sur pastille + chip.
+      // DEUX ETATS VISUELS SEULEMENT : VIVANT (plein) ou MORT (pointille fin).
+      // Les distinctions internes touched / mitigated / invalidated existent
+      // toujours dans le moteur (stats de perf, verdicts win), mais ne changent
+      // PLUS l'apparence a l'ecran — un mort est un mort, un seul style.
+      const lineAlpha = active ? ALPHA.lineActive : T.lineDeadAlpha;
+      const width = active ? W.active : W.dead;
+      const dash = active ? DASH.active : DASH.dead;
+      // Laser : plein feu sur les actifs, eteint sur les morts. Le laser reste
+      // DIRECTIONNEL (bleu/rouge) pour tous — les elites (S>=90) tirent un fluo
+      // PLUS INTENSE (pas d'or sur la ligne : lisibilite long/short d'abord) ;
+      // leur or vit sur pastille + chip.
       const elite = active && Number(poi.score) >= ELITE_SCORE;
       if (elite) hasEliteVisible = true;
-      const glowScale = elite ? 1.7 * pulseK : active ? 1 : touched ? 0.45 : 0;
+      const glowScale = elite ? 1.7 * pulseK : active ? 1 : 0;
       const lw = elite ? width + 0.75 : width;   // trait elite plus epais : hierarchie au premier regard
       laserHline(left, right, y, lw, hue, lineAlpha, dash, glowScale, elite);
 
@@ -246,14 +249,10 @@
         ctx.shadowBlur = 0;
         ctx.lineWidth = 1.5; ctx.strokeStyle = T.casing; ctx.stroke();
       }
-      // Point de RETEST (touche) : cercle creux — plein = naissance, creux = retour
-      if (touched && right > 0 && right < plotW) {
-        ctx.beginPath(); ctx.arc(right, ySnap, 3, 0, Math.PI * 2);
-        ctx.fillStyle = T.casing; ctx.fill();
-        ctx.lineWidth = 1.25; ctx.strokeStyle = rgba(hue, 0.9); ctx.stroke();
-      }
-      // Terminator de niveau MORT : tick vertical net "consomme ici"
-      if (!active && !touched && x2 > 0 && x2 < plotW) {
+      // Terminator de niveau MORT : tick vertical net "consomme ici" — UNIQUE
+      // et identique pour toutes les morts (plus de cercle distinct pour les
+      // touches : deux etats seulement, vivant / mort).
+      if (!active && x2 > 0 && x2 < plotW) {
         ctx.save(); ctx.lineCap = "butt";
         ctx.beginPath();
         ctx.moveTo(Math.round(x2) + 0.5, ySnap - 3); ctx.lineTo(Math.round(x2) + 0.5, ySnap + 3);
@@ -273,7 +272,7 @@
         const cw = chipWidth(price, poi.score);
         if (right - left < cw + 8) return null;
         const cx = Math.min(plotW - rightInset - cw / 2 - 2, Math.max(cw / 2 + 2, (left + right) / 2));
-        drawChip(Math.round(cx - cw / 2), Math.round(y - TAG_H / 2), price, poi.score, hue, touched ? "touched" : "dead", cw);
+        drawChip(Math.round(cx - cw / 2), Math.round(y - TAG_H / 2), price, poi.score, hue, "dead", cw);
         if (centeredPrices) centeredPrices.add(price);
         return null;
       }
