@@ -230,11 +230,17 @@
       const oppPrice = poi.direction === "long" ? poi.zoneHigh : poi.zoneLow;
       const yOpp = oppPrice == null ? null : gon.priceToY(oppPrice);
       if (yEntry == null && yOpp == null) return null;
-      let x1 = gon.timeToX(snapToBarSec(poi.createdTs));
-      if (x1 == null || !isFinite(x1)) x1 = gon.timeToX(snapToBarSec(poi.availableAt));
+      const active = poi.status === "ACTIVE_UNTOUCHED";
+      // Origine du trait : un ACTIF demarre a availableAt (FIN de la bougie M15
+      // de naissance) et non a createdTs (debut) -> le trait ne chevauche plus
+      // sa bougie fondatrice. Le prix y etait PAR DEFINITION (c'est ce qui a cree
+      // le niveau), ce n'est pas un retest : inutile de couper cette bougie. Un
+      // MORT garde createdTs pour montrer sa vraie vie (naissance -> mort).
+      const originMs = active ? poi.availableAt : poi.createdTs;
+      let x1 = gon.timeToX(snapToBarSec(originMs));
+      if (x1 == null || !isFinite(x1)) x1 = gon.timeToX(snapToBarSec(active ? poi.createdTs : poi.availableAt));
       if (x1 == null || !isFinite(x1)) return null;
 
-      const active = poi.status === "ACTIVE_UNTOUCHED";
       const endMs = active ? now : (poi.firstTouchTs ?? poi.statusChangedTs ?? now);
       let x2 = active ? plotW : gon.timeToX(snapToBarSec(endMs));
       if (active && (x2 == null || !isFinite(x2))) x2 = plotW;
