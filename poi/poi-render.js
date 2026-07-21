@@ -40,6 +40,10 @@
   // Ligne FANTOME des morts (pleine largeur, au prix) : tres pale, juste assez
   // pour rester trouvable en scrollant sans encombrer ni "traverser" fort.
   const GHOST_ALPHA = { dark: 0.10, light: 0.14 };
+  // Fantome RESERVE aux scores eleves : seuls les niveaux marquants gardent une
+  // ligne de prix permanente (les faibles restent en detail naissance->mort
+  // pres de l'evenement). Reduit fortement la densite.
+  const GHOST_MIN_SCORE = 90;
   const PRICE_FONT = "600 10px Consolas, 'Roboto Mono', monospace";
   const SCORE_FONT = "700 9px Consolas, 'Roboto Mono', monospace";
   const CHIP_PAD = 6, CHIP_RULE_GAP = 5;
@@ -70,6 +74,10 @@
     const ctx = cv.getContext("2d");
 
     let pois = [], prov = null, visible = true, dpr = 1, showConsumed = false, minScore = 0, climaxOnly = false;
+    // Seuil de score SEPARE pour les niveaux MORTS : le score sert a desencombrer
+    // les morts (tres nombreux), PAS a cacher les vivants (peu, actionnables).
+    // minScore filtre les VIVANTS, deadMinScore filtre les MORTS.
+    let deadMinScore = 0;
     // Reserve a droite (panneau FLUX au-dessus du chart) : les LIGNES passent
     // sous le verre (transparence voulue), seuls les chips se decalent.
     let rightInset = 0;
@@ -509,7 +517,7 @@
           for (const poi of pois) {
             if (poi.status === "ACTIVE_UNTOUCHED") continue;
             if (climaxOnly && !poi.climax) continue;
-            if ((poi.score || 0) < minScore) continue;
+            if ((poi.score || 0) < Math.max(deadMinScore, GHOST_MIN_SCORE)) continue;   // fantome = morts a score eleve
             const lvl = refPrice(poi);
             if (!(lvl >= pLo && lvl <= pHi)) continue;
             const key = Math.round(lvl * 1e6);
@@ -527,8 +535,9 @@
         let shown = [];
         for (const poi of pois) {
           if (climaxOnly && !poi.climax) continue;   // vue climax : bougies a volume dominant
-          if ((poi.score || 0) < minScore) continue;
-          if (!showConsumed && poi.status !== "ACTIVE_UNTOUCHED") continue;
+          const isDead = poi.status !== "ACTIVE_UNTOUCHED";
+          if ((poi.score || 0) < (isDead ? deadMinScore : minScore)) continue;   // seuils separes morts/vivants
+          if (!showConsumed && isDead) continue;
           const lvl = refPrice(poi);
           if (!(lvl >= pLo && lvl <= pHi)) continue;
           if (vis && !intersectsView(poi, vis, now)) continue;
@@ -676,6 +685,7 @@
       setVisible(v) { visible = !!v; mark(); },
       setShowConsumed(v) { showConsumed = !!v; mark(); },
       setMinScore(v) { minScore = Math.max(0, Math.min(100, Number(v) || 0)); mark(); },
+      setDeadMinScore(v) { deadMinScore = Math.max(0, Math.min(100, Number(v) || 0)); mark(); },
       setClimaxOnly(v) { climaxOnly = !!v; mark(); },
       repaint: mark,
       destroy() {

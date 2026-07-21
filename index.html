@@ -2,6 +2,13 @@
 <html>
 <head>
 <meta charset="utf-8">
+<!-- ANTI-CACHE : le navigateur re-telecharge index.html a CHAQUE chargement au
+     lieu de servir une version en cache (les collegues ne voyaient pas les
+     mises a jour car index.html cache pointait vers d'anciens ?v=NN). Les
+     scripts gardent leur ?v=NN pour busting fin. -->
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' https://unpkg.com 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self' https://fapi.binance.com wss://fstream.binance.com; img-src 'self'; media-src 'self'; base-uri 'none'">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>G-Bot — Futures Perp</title>
@@ -2577,20 +2584,25 @@ setInterval(() => {
    depuis le chargement, on recharge la page — mais seulement apres 1 min sans
    interaction, pour ne jamais couper une session active. Localhost exclu. */
 if (location.hostname.endsWith('github.io')) {
-  let vSym = null, vTag = null;
+  let vSym = null, vTag = null, vCode = null;
   const archUrl = () => 'poi/' + (symbol === 'BTCUSDT' ? 'antho-v1-m15-pois.json' : 'archive-' + symbol + '-m15.json');
-  const tagNow = async () => {
+  const tagOf = async (url) => {
     try {
-      const r = await fetch(archUrl(), { method: 'HEAD', cache: 'no-store' });
+      const r = await fetch(url, { method: 'HEAD', cache: 'no-store' });
       return r.ok ? (r.headers.get('etag') || r.headers.get('last-modified')) : null;
     } catch { return null; }
   };
   setInterval(async () => {
     if (replay || loading) return;
-    const t = await tagNow();
-    if (!t) return;
+    // On surveille DEUX choses : l'archive (donnees fraiches) ET index.html
+    // (code : filtre, rendu, etc.). Un changement de l'un OU l'autre = reload,
+    // sinon les collegues ne voyaient jamais les mises a jour de CODE.
+    const [t, c] = await Promise.all([tagOf(archUrl()), tagOf('index.html')]);
+    if (vCode == null && c) vCode = c;                          // 1re base du code
     if (vSym !== symbol) { vSym = symbol; vTag = t; return; }   // (re)base sur le symbole affiche
-    if (t === vTag || Date.now() - gonLastTouch <= 60000) return;
+    const archChanged = t && t !== vTag;                        // t null (HEAD KO) => false, pas de faux reload
+    const codeChanged = c && c !== vCode;
+    if ((!archChanged && !codeChanged) || Date.now() - gonLastTouch <= 60000) return;
     // ANTI-BOUCLE : le CDN peut servir des ETags incoherents entre noeuds
     // pendant la propagation (~10 min). Un reload au plus toutes les 12 min
     // (via sessionStorage, qui survit au reload) casse tout cycle possible ;
@@ -2611,10 +2623,10 @@ load();
 <script src="poi/poi-detector.js?v=3"></script>
 <script src="poi/poi-lifecycle.js?v=5"></script>
 <script src="poi/stream.js?v=1"></script>
-<script src="poi/poi-render.js?v=45"></script>
-<script src="poi/poi-feature.js?v=32"></script>
+<script src="poi/poi-render.js?v=47"></script>
+<script src="poi/poi-feature.js?v=34"></script>
 <script src="poi/liq-flux.js?v=21"></script>
 <script src="poi/whale-sonar.js?v=26"></script>
-<script src="poi/confluence.js?v=23"></script>
+<script src="poi/confluence.js?v=24"></script>
 </body>
 </html>

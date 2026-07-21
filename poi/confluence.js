@@ -36,7 +36,7 @@
    * profil = volume distribue sur le range de chaque bougie. Refetch quand la
    * fenetre visible bouge de >25 % (mini 8 s entre appels) ou toutes les 60 s. */
   let profile = new Map(), profMax = 0, pocBin = null, cvdPts = [], binSize = 10;
-  let lastKlinesAt = 0, klinesBusy = false, lastFetchRange = null;
+  let lastKlinesAt = 0, klinesBusy = false, lastFetchRange = null, lastTf = "";
   function pickInterval(spanSec) {
     for (const [iv, sec] of [["5m", 300], ["15m", 900], ["1h", 3600], ["4h", 14400], ["1d", 86400]]) {
       if (spanSec / sec <= 700) return [iv, sec];
@@ -164,6 +164,15 @@
     const host = cvPanel.getBoundingClientRect();
     const w = Math.round(host.width), h = Math.round(host.height);
     if (w > 0 && h > 0 && (cvPanel.width !== w || cvPanel.height !== h)) { cvPanel.width = w; cvPanel.height = h; }
+    // Echelle de prix pas prete (bougies en rechargement au changement de TF) :
+    // priceToY renvoie null -> toutes les barres seraient ecartees et le profil
+    // clignoterait. On GARDE l'image precedente tant que l'echelle n'est pas
+    // revenue, au lieu d'effacer a vide.
+    if (profile.size) {
+      const anyBin = profile.keys().next().value;
+      const py = gon.priceToY(anyBin * binSize);
+      if (py == null || !isFinite(py)) return;
+    }
     cxPanel.clearRect(0, 0, w, h);
     // le panneau partage l'echelle du chart : y_chart -> y_panel via l'offset
     // vertical entre les deux boites (tops alignes par le flex, mais robuste)
@@ -184,11 +193,16 @@
         const yTop = Math.min(y0, y1) + dy + Math.abs(y0 - y1) * 0.09;
         if (yTop + hh < 30 || yTop > h - 8) continue;
         const wBar = e.vol / profMax * maxW;
-        bars.push({ b, yTop, hh, wBar, wBuy: wBar * Math.max(0, Math.min(1, e.buy / e.vol)) });
+        const buyFrac = e.vol > 0 ? Math.max(0, Math.min(1, e.buy / e.vol)) : 0.5;   // 0/0 -> NaN sinon
+        bars.push({ b, yTop, hh, wBar, wBuy: wBar * buyFrac });
       }
-      // glow UNE fois par passe de couleur (pas par barre) et seulement si
-      // les lignes sont assez hautes — fluide pendant le drag de l'axe
-      const glow = bars.length > 0 && bars[0].hh >= 2.5;
+      // glow UNE fois par passe de couleur (pas par barre) et seulement si les
+      // lignes sont assez hautes. Base sur la MEDIANE des hauteurs (stable), pas
+      // sur bars[0] (barre arbitraire dont le hh traversait le seuil au zoom de
+      // l'axe prix -> tout le profil scintillait). Seuil un peu plus haut = pas
+      // de bascule au ras.
+      const hMed = bars.length ? bars.map((bb) => bb.hh).sort((a, b) => a - b)[bars.length >> 1] : 0;
+      const glow = hMed >= 3;
       cxPanel.save();
       if (glow) { cxPanel.shadowColor = BUY; cxPanel.shadowBlur = 5; }
       for (const bar of bars) {
@@ -269,13 +283,16 @@
     if (cvdPts.length < 2) return;
     // zone volume de G-Bot : scaleMargins top .85 -> le bandeau occupe ~15 %
     const zTop = h * 0.85, zBot = h - 22;
+    // Echelle verticale du CVD sur TOUTE la serie (stable), pas sur les seuls
+    // points visibles : sinon l'aire se redimensionne a chaque pan/zoom et SAUTE
+    // au changement de TF (le sous-ensemble visible change).
     let cMin = Infinity, cMax = -Infinity;
+    for (const p of cvdPts) { if (p.cvd < cMin) cMin = p.cvd; if (p.cvd > cMax) cMax = p.cvd; }
     const pts = [];
     for (const p of cvdPts) {
       const x = gon.timeToX(p.tSec);
       if (x == null || !isFinite(x) || x < -40 || x > w - 60) continue;
       pts.push({ x, cvd: p.cvd });
-      if (p.cvd < cMin) cMin = p.cvd; if (p.cvd > cMax) cMax = p.cvd;
     }
     if (pts.length < 2 || !(cMax > cMin)) return;
     const yC = (v) => zBot - (v - cMin) / (cMax - cMin) * (zBot - zTop - 6);
@@ -348,6 +365,13 @@
       if (ws) { ws.onclose = null; try { ws.close(); } catch (_) {} ws = null; }
       connect();
       rebuildFromKlines();
+    }
+    // Changement de TF : le module derivait son intervalle du span visible et
+    // etait bloque par les throttles 8 s / 55 s -> profil de l'ancien TF affiche
+    // puis saut differe. On force un refetch IMMEDIAT en annulant les throttles.
+    if (gon.tf && gon.tf !== lastTf) {
+      lastTf = gon.tf;
+      lastKlinesAt = 0; lastFetchRange = null;
     }
     if (ws && ws.readyState === 1 && lastMsgAt && Date.now() - lastMsgAt > STALL_MS) ws.close();
     if (shown()) rebuildFromKlines();
