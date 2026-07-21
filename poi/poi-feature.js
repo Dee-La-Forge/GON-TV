@@ -504,7 +504,22 @@
     const snap = Object.assign({}, cur, { availableAt: nowTs, complete: true });
     const detected = B.detectPoi(snap, poiHistory, poiConfig, nowTs);
     if (!detected) { clearPoiProvisional(); return; }
-    poiProvisional = Object.assign({}, decorateClimax(detected, cur, poiHistory), { provisional: true });
+    const provPoi = Object.assign({}, decorateClimax(detected, cur, poiHistory), { provisional: true });
+    // GARDE anti-croisement : un provisoire est HORS lifecycle (il ne meurt
+    // jamais). Si le prix de sa PROPRE bougie en cours encadre la ligne d'entree
+    // dessinee (low < entry < high), cette ligne serait tracee EN TRAVERS du
+    // corps des bougies : le "niveau live tape par les bougies mais pas mort"
+    // que le trader rejette. On ne montre le provisoire que quand le prix a
+    // DEGAGE le niveau (entierement d'un cote). high/low d'une footprint ouverte
+    // ne font que s'ecarter -> une fois masque il reste masque jusqu'a la
+    // cloture (aucun flicker). A la cloture, le POI DEFINITIF prend le relais
+    // avec son lifecycle complet et son trait qui demarre apres le gap. Garde
+    // VISUELLE pure : n'ecrit rien dans le corpus ni le moteur.
+    const provEntry = provPoi.entry ?? provPoi.entryPrice;
+    if (provEntry != null && cur.low < provEntry && provEntry < cur.high) {
+      clearPoiProvisional(); return;
+    }
+    poiProvisional = provPoi;
     render.setProvisional(poiProvisional);
   }
 
