@@ -215,10 +215,17 @@
       const active = poi.status === "ACTIVE_UNTOUCHED";
       const endMs = active ? now : (poi.firstTouchTs ?? poi.statusChangedTs ?? now);
       let x2 = active ? plotW : gon.timeToX(snapToBarSec(endMs));
-      if (x2 == null || !isFinite(x2)) x2 = plotW;
+      if (active && (x2 == null || !isFinite(x2))) x2 = plotW;
+      // Niveau MORT : trait BORNE. Une queue pointillee qui se termine PILE sur
+      // la bougie de mort (x2) et remonte au plus DEAD_TAIL_PX vers la gauche
+      // (ou la naissance si plus proche). Fini le trait plein-ecran qui balaie
+      // toutes les bougies et le repli sur plotW (source des labels alignes).
+      if (!active && (x2 == null || !isFinite(x2))) return null;   // mort non placable -> rien (plus de repli plotW)
+      // MORT : le trait va de la bougie de DEPART (naissance, x1) a la bougie de
+      // FIN (mort, x2). Span REEL, borne a la mort (fini le repli plein-ecran).
       const left = Math.max(0, x1);
-      const right = Math.min(plotW, Math.max(x2, x1 + 2));
-      if (right <= 0 || left >= plotW) return null;
+      const right = active ? Math.min(plotW, Math.max(x2, x1 + 2)) : Math.min(plotW, x2);
+      if (right <= 0 || left >= plotW || right <= left) return null;
 
       const hue = HUE[poi.direction] || HUE.long;
       const y = yEntry != null ? yEntry : yOpp;
@@ -240,38 +247,46 @@
       laserHline(left, right, y, lw, hue, lineAlpha, dash, glowScale, elite);
 
       const ySnap = Math.round(y) + 0.5;
-      // Point d'ORIGINE (bougie source) : disque chaud + anneau de gainage
-      if (x1 >= 0 && x1 <= plotW) {
-        if (glowScale > 0) { ctx.shadowColor = rgba(hue, 0.9); ctx.shadowBlur = 10 * glowScale; }
-        ctx.beginPath(); ctx.arc(x1, ySnap, 2.5, 0, Math.PI * 2);
-        ctx.fillStyle = glowScale > 0 ? rgba(tint(hue, 0.45), lineAlpha) : rgba(hue, lineAlpha);
-        ctx.fill();
-        ctx.shadowBlur = 0;
-        ctx.lineWidth = 1.5; ctx.strokeStyle = T.casing; ctx.stroke();
-      }
-      // Terminator de niveau MORT : tick vertical net "consomme ici" — UNIQUE
-      // et identique pour toutes les morts (plus de cercle distinct pour les
-      // touches : deux etats seulement, vivant / mort).
-      if (!active && x2 > 0 && x2 < plotW) {
-        ctx.save(); ctx.lineCap = "butt";
-        ctx.beginPath();
-        ctx.moveTo(Math.round(x2) + 0.5, ySnap - 3); ctx.lineTo(Math.round(x2) + 0.5, ySnap + 3);
-        ctx.strokeStyle = rgba(hue, T.lineDeadAlpha); ctx.lineWidth = 1; ctx.stroke();
-        ctx.restore();
+      const deadMarkA = T.lineDeadAlpha + 0.25;   // bouts un peu plus francs que le trait
+      if (active) {
+        // Point d'ORIGINE actif : disque chaud + anneau de gainage.
+        if (x1 >= 0 && x1 <= plotW) {
+          if (glowScale > 0) { ctx.shadowColor = rgba(hue, 0.9); ctx.shadowBlur = 10 * glowScale; }
+          ctx.beginPath(); ctx.arc(x1, ySnap, 2.5, 0, Math.PI * 2);
+          ctx.fillStyle = glowScale > 0 ? rgba(tint(hue, 0.45), lineAlpha) : rgba(hue, lineAlpha);
+          ctx.fill(); ctx.shadowBlur = 0;
+          ctx.lineWidth = 1.5; ctx.strokeStyle = T.casing; ctx.stroke();
+        }
+      } else {
+        // MORT : marqueur aux DEUX bouts du trait, sur leurs bougies exactes.
+        // DEPART (naissance) = petit rond CREUX sur la bougie source.
+        if (x1 >= 0 && x1 <= plotW) {
+          ctx.beginPath(); ctx.arc(x1, ySnap, 3, 0, Math.PI * 2);
+          ctx.fillStyle = T.casing; ctx.fill();
+          ctx.lineWidth = 1.25; ctx.strokeStyle = rgba(hue, deadMarkA); ctx.stroke();
+        }
+        // FIN (mort) = tick vertical net "consomme ici" sur la bougie de mort.
+        if (x2 > 0 && x2 < plotW) {
+          ctx.save(); ctx.lineCap = "butt";
+          ctx.beginPath();
+          ctx.moveTo(Math.round(x2) + 0.5, ySnap - 4); ctx.lineTo(Math.round(x2) + 0.5, ySnap + 4);
+          ctx.strokeStyle = rgba(hue, deadMarkA); ctx.lineWidth = 1.25; ctx.stroke();
+          ctx.restore();
+        }
       }
 
       if (!Number.isFinite(poi.score) || !wantLabel) return null;
       const price = entryPrice != null ? entryPrice : oppPrice;
       // (elite est reporte sur le chip de droite via une pastille or)
       if (!active) {
-        // Niveaux NON-ACTIFS (touches + consommes) : label centre sur la ligne.
-        // La colonne de droite est reservee aux ACTIFS, et un prix deja etiquete
-        // au centre n'est PAS re-etiquete a droite (anti-doublon de prix).
-        // Pas de chip si le segment VISIBLE est plus court que lui : un label
-        // clampe au bord sans ligne dessous se lit comme un niveau "flottant".
+        // Niveaux MORTS : label CENTRE sur le niveau, au MILIEU de sa vie
+        // (naissance -> mort). Le centre = milieu de deux bougies FIXES, donc il
+        // glisse avec le graphe au scroll (stable). Si ce centre sort de l'ecran,
+        // on n'affiche pas le label (au lieu de le rabattre au bord = colonnes
+        // alignees, le defaut d'avant).
         const cw = chipWidth(price, poi.score);
-        if (right - left < cw + 8) return null;
-        const cx = Math.min(plotW - rightInset - cw / 2 - 2, Math.max(cw / 2 + 2, (left + right) / 2));
+        const cx = (x1 + x2) / 2;
+        if (cx < cw / 2 + 2 || cx > plotW - rightInset - cw / 2 - 2) return null;
         drawChip(Math.round(cx - cw / 2), Math.round(y - TAG_H / 2), price, poi.score, hue, "dead", cw);
         if (centeredPrices) centeredPrices.add(price);
         return null;
@@ -436,11 +451,10 @@
 
     function paint() {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.clearRect(0, 0, cv.width, cv.height);
-      // Remis AVANT les early-returns : sinon la boucle pulse continue de
-      // repeindre un canvas masque/vide a ~30fps toute la session.
       hasEliteVisible = false;
-      if (!visible || (!pois.length && !prov)) return;
+      // Etat stable "rien a montrer" (masque / aucun POI) : on efface, c'est
+      // definitif tant que la vue ne change pas.
+      if (!visible || (!pois.length && !prov)) { ctx.clearRect(0, 0, cv.width, cv.height); return true; }
       let axisH = 0;
       try { axisH = (typeof gon.ts().height === "function" ? gon.ts().height() : 0) || 0; } catch (_) {}
       const paneH = Math.max(1, cv.height / dpr - axisH);
@@ -449,7 +463,13 @@
         const a = gon.series.coordinateToPrice(0), b = gon.series.coordinateToPrice(paneH);
         if (a != null && b != null) { pHi = Math.max(a, b); pLo = Math.min(a, b); }
       } catch (_) {}
-      if (!isFinite(pLo) || !isFinite(pHi)) return;
+      // Echelle de prix pas encore prete (transitoire pendant un zoom/pan/maj) :
+      // on NE VIDE PAS le canvas -> on garde la derniere image et on RETENTE au
+      // tick suivant. Sans ca, les zones s'effacent et ne reviennent qu'au
+      // prochain changement de vue ("par moment les zones s'effacent... au zoom
+      // elles reapparaissent"). Retour false = "echec transitoire".
+      if (!isFinite(pLo) || !isFinite(pHi)) return false;
+      ctx.clearRect(0, 0, cv.width, cv.height);   // on efface SEULEMENT quand on va redessiner
       const plotW = (typeof gon.ts().width === "function" ? gon.ts().width() : cv.width / dpr) || cv.width / dpr;
       const now = Date.now();
       // Battement MAXIMAL (~2 s, +/-80%) : au creux le halo elite retombe
@@ -512,6 +532,7 @@
       } finally {
         ctx.restore();
       }
+      return true;   // frame dessinee avec succes
     }
 
     // ✦ VALIDES — regle de retest (long sur trait bleu, short sur trait
@@ -585,11 +606,11 @@
         const now = performance.now();
         const pulseDue = hasEliteVisible && now - lastPulsePaint >= 33;
         if (forceDirty || sig !== lastSig || pulseDue) {
-          paint();
-          // commit APRES un paint reussi : une exception laisse l'etat dirty
-          // et la frame se retente au tick suivant au lieu de figer une frame
-          // partiellement dessinee.
-          forceDirty = false; lastSig = sig; lastPulsePaint = now;
+          // paint() renvoie false si l'echelle de prix n'etait pas prete
+          // (transitoire) : on GARDE l'etat dirty pour retenter au tick suivant
+          // au lieu de figer un canvas vide jusqu'au prochain changement de vue.
+          if (paint() !== false) { forceDirty = false; lastSig = sig; lastPulsePaint = now; }
+          else { forceDirty = true; }
         }
       } catch (error) {
         if (!tick.warned) { tick.warned = true; console.warn("[POI] erreur de rendu (boucle preservee)", error); }
