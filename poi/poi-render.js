@@ -231,14 +231,20 @@
       const yOpp = oppPrice == null ? null : gon.priceToY(oppPrice);
       if (yEntry == null && yOpp == null) return null;
       const active = poi.status === "ACTIVE_UNTOUCHED";
-      // Origine du trait : un ACTIF demarre a availableAt (FIN de la bougie M15
-      // de naissance) et non a createdTs (debut) -> le trait ne chevauche plus
-      // sa bougie fondatrice. Le prix y etait PAR DEFINITION (c'est ce qui a cree
-      // le niveau), ce n'est pas un retest : inutile de couper cette bougie. Un
-      // MORT garde createdTs pour montrer sa vraie vie (naissance -> mort).
-      const originMs = active ? poi.availableAt : poi.createdTs;
+      // Origine du trait ACTIF : on demarre a la FIN DU GAP DOCTRINAL (le niveau
+      // devient reellement EXPOSE), pas a la naissance. Pendant le gap (bougie
+      // fondatrice + 2 bougies M15, invariant projet) le prix est encore dans la
+      // zone de creation : ces touches sont PROTEGEES (bruit de creation) et le
+      // niveau reste actif a raison. Mais un trait qui les couvrirait donnerait
+      // l'illusion d'un niveau "tape mais pas mort". En partant apres le gap, le
+      // trait ne couvre QUE la periode ou toute bougie qui le touche le TUE :
+      // plus aucun croisement trompeur. eligible = availableAt + 2*(M15) ; on
+      // derive le M15 des timestamps du POI (availableAt - createdTs).
+      const m15 = (poi.availableAt && poi.createdTs) ? (poi.availableAt - poi.createdTs) : 0;
+      const eligibleMs = poi.availableAt + 2 * m15;
+      const originMs = active ? eligibleMs : poi.createdTs;   // MORT : garde createdTs (vraie vie naissance->mort)
       let x1 = gon.timeToX(snapToBarSec(originMs));
-      if (x1 == null || !isFinite(x1)) x1 = gon.timeToX(snapToBarSec(active ? poi.createdTs : poi.availableAt));
+      if (x1 == null || !isFinite(x1)) x1 = gon.timeToX(snapToBarSec(active ? poi.availableAt : poi.availableAt));
       if (x1 == null || !isFinite(x1)) return null;
 
       const endMs = active ? now : (poi.firstTouchTs ?? poi.statusChangedTs ?? now);
