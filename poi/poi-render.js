@@ -565,7 +565,12 @@
         for (const poi of shown) {
           const y = gon.priceToY(refPrice(poi));
           if (y == null || !isFinite(y)) continue;
-          const dead = rank(poi) === 0;
+          // "dead" au sens du RENDU (chip centre) = tout niveau non-actif, y
+          // compris TOUCHED : drawLevel rend TOUCHED comme un mort (chip centre,
+          // hauteur TAG_H). L'ancien `rank===0` mettait TOUCHED dans liveY avec un
+          // gap 8px alors que son chip centre (16px) exige le gap DEAD_GAP_PX(19)
+          // -> chips de touches qui se chevauchaient. On aligne sur le rendu.
+          const dead = poi.status !== "ACTIVE_UNTOUCHED";
           const arr = dead ? keptDead : keptLive;
           const arrY = dead ? deadY : liveY;
           const gap = dead ? DEAD_GAP_PX : DECLUTTER_GAP_PX;
