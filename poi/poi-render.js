@@ -71,6 +71,10 @@
     // sous le verre (transparence voulue), seuls les chips se decalent.
     let rightInset = 0;
     let rafId = 0, lastSig = null, forceDirty = true, destroyed = false;
+    // Identite (TF/symbole) de la DERNIERE image valide : si elle change alors
+    // que l'echelle n'est pas encore prete, l'ancienne image est PERIMEE
+    // (positions de l'ancienne TF) et doit etre effacee, pas figee.
+    let lastGoodTf = null, lastGoodSym = null;
     // Pulsation discrete des ELITES : phase temporelle appliquee a leur glow.
     // hasEliteVisible arme le repaint continu ; sans elite a l'ecran, la
     // boucle reste purement dirty-based (zero repaint inutile).
@@ -454,7 +458,7 @@
       hasEliteVisible = false;
       // Etat stable "rien a montrer" (masque / aucun POI) : on efface, c'est
       // definitif tant que la vue ne change pas.
-      if (!visible || (!pois.length && !prov)) { ctx.clearRect(0, 0, cv.width, cv.height); return true; }
+      if (!visible || (!pois.length && !prov)) { ctx.clearRect(0, 0, cv.width, cv.height); lastGoodTf = gon.tf; lastGoodSym = gon.symbol; return true; }
       let axisH = 0;
       try { axisH = (typeof gon.ts().height === "function" ? gon.ts().height() : 0) || 0; } catch (_) {}
       const paneH = Math.max(1, cv.height / dpr - axisH);
@@ -466,9 +470,13 @@
       // Echelle de prix pas encore prete (transitoire pendant un zoom/pan/maj) :
       // on NE VIDE PAS le canvas -> on garde la derniere image et on RETENTE au
       // tick suivant. Sans ca, les zones s'effacent et ne reviennent qu'au
-      // prochain changement de vue ("par moment les zones s'effacent... au zoom
-      // elles reapparaissent"). Retour false = "echec transitoire".
-      if (!isFinite(pLo) || !isFinite(pHi)) return false;
+      // prochain changement de vue. MAIS si la TF/symbole a CHANGE depuis la
+      // derniere image, celle-ci montre les positions de l'ANCIENNE TF (traits/
+      // labels decales) : on l'efface au lieu de la figer. Retour false = retry.
+      if (!isFinite(pLo) || !isFinite(pHi)) {
+        if (gon.tf !== lastGoodTf || gon.symbol !== lastGoodSym) ctx.clearRect(0, 0, cv.width, cv.height);
+        return false;
+      }
       ctx.clearRect(0, 0, cv.width, cv.height);   // on efface SEULEMENT quand on va redessiner
       const plotW = (typeof gon.ts().width === "function" ? gon.ts().width() : cv.width / dpr) || cv.width / dpr;
       const now = Date.now();
@@ -532,6 +540,7 @@
       } finally {
         ctx.restore();
       }
+      lastGoodTf = gon.tf; lastGoodSym = gon.symbol;   // identite de l'image valide
       return true;   // frame dessinee avec succes
     }
 
