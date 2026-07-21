@@ -2554,6 +2554,10 @@ window.__gon = {
   get replay() { return !!replay; },   // les modules masquent les infos "futures" (verdicts ✦) en replay
   priceToY: p => series.priceToCoordinate(p),
   timeToX: xOf,
+  // G-ON : ouverture de bougie de la grille COURANTE (epoch / lundi W0 / mois
+  // calendaire). Source UNIQUE du snap des pastilles POI cote rendu — plus de
+  // grille reimplementee a resynchroniser (le mensuel calendaire notamment).
+  bucketStart,
   mount: $('chartwrap'),
   invalidate,
 };
@@ -2638,7 +2642,7 @@ load();
 <script src="poi/poi-detector.js?v=3"></script>
 <script src="poi/poi-lifecycle.js?v=5"></script>
 <script src="poi/stream.js?v=1"></script>
-<script src="poi/poi-render.js?v=52"></script>
+<script src="poi/poi-render.js?v=53"></script>
 <script src="poi/poi-feature.js?v=37"></script>
 <script src="poi/liq-flux.js?v=22"></script>
 <script src="poi/whale-sonar.js?v=27"></script>
