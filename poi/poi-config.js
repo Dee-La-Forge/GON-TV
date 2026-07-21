@@ -59,6 +59,18 @@
     if (config.minHistoryCandles > config.historyCandles) {
       throw new RangeError("minHistoryCandles ne peut pas depasser historyCandles");
     }
+    // Plages fail-loud : validees "finies" plus haut, mais des valeurs hors
+    // plage DESACTIVENT silencieusement une protection.
+    //  - maxActivePois <= 0 -> .slice(-0) === .slice(0) = tout le tableau : le
+    //    plafond de POI actifs saute (fuite memoire/rendu). Doit etre entier > 0.
+    //  - minRetestGapCandles < 0 -> eligibleAt < availableAt : fenetre de gap
+    //    inversee, la protection de retest saute. Doit etre >= 0.
+    if (!(Number.isInteger(config.maxActivePois) && config.maxActivePois > 0)) {
+      throw new RangeError("maxActivePois doit etre un entier > 0");
+    }
+    if (!(config.minRetestGapCandles >= 0)) {
+      throw new RangeError("minRetestGapCandles doit etre >= 0");
+    }
     return Object.freeze(config);
   }
 

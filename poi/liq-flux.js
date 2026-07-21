@@ -178,7 +178,9 @@
         waveCx.fillStyle = "#fff"; waveCx.fillRect(p.x - 4, 1, 4, 3); waveCx.restore();
       }
     }
-    rafId = requestAnimationFrame(fluxLoop);
+    // Masque (media-query fenetre etroite, offsetParent null) : on STOPPE la
+    // boucle rAF au lieu de tourner a 60 fps a vide ; slowTick la relance.
+    rafId = panelShown() ? requestAnimationFrame(fluxLoop) : 0;
   }
 
   function addJournalRow(side, usd, at) {
@@ -215,6 +217,9 @@
     } else { domEls.pct.textContent = "—"; domEls.pct.style.color = ""; }
     // watchdog socket muette (les liqs tous-marches arrivent en continu)
     if (ws && ws.readyState === 1 && lastMsgAt && Date.now() - lastMsgAt > STALL_MS) ws.close();
+    // relance la boucle rAF si le panneau, masque puis re-affiche (media-query),
+    // l'avait arretee (fluxLoop met rafId=0 quand !panelShown).
+    if (panelShown() && !rafId) rafId = requestAnimationFrame(fluxLoop);
   }
 
   /* ---------- construction ---------- */

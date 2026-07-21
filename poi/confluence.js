@@ -81,10 +81,17 @@
       // HYSTERESIS : on ne change de bin que si l'ecart depasse ~2x — sinon
       // chaque refetch reshufflait toutes les barres (profil "instable").
       const raw = (hi - lo) / 90;
-      const mag = Math.pow(10, Math.floor(Math.log10(raw)));
-      let target = 10 * mag;
-      for (const m of [1, 2, 5]) if (raw <= m * mag) { target = m * mag; break; }
-      if (!(binSize > 0) || target > binSize * 1.9 || target < binSize / 1.9) binSize = target;
+      // Fenetre parfaitement plate (high===low, marche halte) : raw=0 ->
+      // log10(0)=-Inf -> target=0 -> binSize=0 -> b0/b1=+-Inf, share=NaN, profil
+      // corrompu 1 cycle. On garde le binSize precedent (ou 1 au demarrage).
+      if (!(raw > 0)) {
+        if (!(binSize > 0)) binSize = 1;
+      } else {
+        const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+        let target = 10 * mag;
+        for (const m of [1, 2, 5]) if (raw <= m * mag) { target = m * mag; break; }
+        if (!(binSize > 0) || target > binSize * 1.9 || target < binSize / 1.9) binSize = target;
+      }
       const prof = new Map(), pts = [];
       let cum = 0;
       for (const k of rows) {
@@ -163,16 +170,16 @@
     // panneau decalait tout le rendu de 26 px vers le bas (audit #3).
     const host = cvPanel.getBoundingClientRect();
     const w = Math.round(host.width), h = Math.round(host.height);
-    if (w > 0 && h > 0 && (cvPanel.width !== w || cvPanel.height !== h)) { cvPanel.width = w; cvPanel.height = h; }
-    // Echelle de prix pas prete (bougies en rechargement au changement de TF) :
-    // priceToY renvoie null -> toutes les barres seraient ecartees et le profil
-    // clignoterait. On GARDE l'image precedente tant que l'echelle n'est pas
-    // revenue, au lieu d'effacer a vide.
+    // Garde readiness AVANT le resize : reassigner cvPanel.width EFFACE le
+    // bitmap ; si un resize coincide avec une frame ou priceToY est null (TF en
+    // rechargement + fenetre qui se redimensionne), on aurait efface PUIS
+    // return -> flash blanc. On garde l'image precedente intacte a la place.
     if (profile.size) {
       const anyBin = profile.keys().next().value;
       const py = gon.priceToY(anyBin * binSize);
       if (py == null || !isFinite(py)) return;
     }
+    if (w > 0 && h > 0 && (cvPanel.width !== w || cvPanel.height !== h)) { cvPanel.width = w; cvPanel.height = h; }
     cxPanel.clearRect(0, 0, w, h);
     // le panneau partage l'echelle du chart : y_chart -> y_panel via l'offset
     // vertical entre les deux boites (tops alignes par le flex, mais robuste)
@@ -333,7 +340,6 @@
 
   let hiddenCleared = false;
   function loop() {
-    rafId = requestAnimationFrame(loop);
     if (!shown()) {
       // le CVD vit sur le CHART : si la colonne se masque (media query),
       // l'overlay doit etre efface — sinon il reste incruste et se desaligne.
@@ -341,9 +347,13 @@
         cxCvd.clearRect(0, 0, cvCvd.width, cvCvd.height);
         hiddenCleared = true;
       }
+      // On ARRETE la boucle rAF quand le panneau est masque (fenetre etroite) au
+      // lieu de tourner a 60 fps a vide (CPU/batterie) ; slowTick la relance.
+      rafId = 0;
       return;
     }
     hiddenCleared = false;
+    rafId = requestAnimationFrame(loop);
     const now = performance.now();
     drawPanel(now);
     drawCvd();
@@ -362,6 +372,7 @@
       curSymbol = gon.symbol;
       walls = new Map(); ghosts = []; profile = new Map(); cvdPts = [];
       lastKlinesAt = 0; lastFetchRange = null;
+      attempt = 0;   // backoff neuf pour le nouveau symbole (sinon demarre haut)
       if (ws) { ws.onclose = null; try { ws.close(); } catch (_) {} ws = null; }
       connect();
       rebuildFromKlines();
@@ -374,7 +385,7 @@
       lastKlinesAt = 0; lastFetchRange = null;
     }
     if (ws && ws.readyState === 1 && lastMsgAt && Date.now() - lastMsgAt > STALL_MS) ws.close();
-    if (shown()) rebuildFromKlines();
+    if (shown()) { rebuildFromKlines(); if (!rafId) rafId = requestAnimationFrame(loop); }   // relance la boucle si masquee puis re-affichee
     // (l'ancien suivi video<->toggle ≋ est retire : le toggle n'existe plus,
     // la visibilite de la video est geree par la media query CSS + le cinema)
   }

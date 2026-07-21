@@ -1177,6 +1177,7 @@ function startWs(attempt = 0) {
     if (gotMsg && Date.now() - lastMsgAt > 15000) {
       muted = true;
       if (ws) { try { ws.close(); } catch {} ws = null; }
+      clearInterval(staleTimer); staleTimer = null;   // ne pas laisser tourner ce timer en no-op apres bascule poll
       startPoll(seq);
     }
   }, 5000);
@@ -2568,7 +2569,12 @@ const gonArm = () => { gonLastTouch = Date.now(); };
 ['pointerdown', 'pointermove', 'wheel', 'touchstart', 'touchmove', 'keydown'].forEach(ev =>
   window.addEventListener(ev, gonArm, { passive: true, capture: true }));
 window.addEventListener('pointerdown', () => { gonDragging = true; }, { capture: true, passive: true });
-window.addEventListener('pointerup', () => { gonDragging = false; gonArm(); }, { capture: true, passive: true });
+// pointerup MAIS AUSSI pointercancel (geste systeme/tactile) et blur (pointeur
+// relache hors fenetre) : sans eux, un drag jamais "up" laisse gonDragging=true
+// pour toujours -> le retour auto au direct reste bloque en silence.
+['pointerup', 'pointercancel'].forEach(ev =>
+  window.addEventListener(ev, () => { gonDragging = false; gonArm(); }, { capture: true, passive: true }));
+window.addEventListener('blur', () => { gonDragging = false; });
 setInterval(() => {
   if (replay || loading || gonDragging || Date.now() - gonLastTouch < 30000) return;
   try {
@@ -2592,14 +2598,23 @@ if (location.hostname.endsWith('github.io')) {
       return r.ok ? (r.headers.get('etag') || r.headers.get('last-modified')) : null;
     } catch { return null; }
   };
+  // BASE DE REFERENCE etablie DES LE CHARGEMENT (pas au 1er tick a +3 min) :
+  // sinon un deploiement code arrive entre le load et le 1er probe est adopte
+  // comme base et ne declenche JAMAIS de reload (les collegues restent sur
+  // l'ancienne version — le bug meme que ce mecanisme doit eviter).
+  (async () => {
+    const [t, c] = await Promise.all([tagOf(archUrl()), tagOf('index.html')]);
+    if (c) vCode = c;
+    if (t) { vSym = symbol; vTag = t; }
+  })();
   setInterval(async () => {
     if (replay || loading) return;
     // On surveille DEUX choses : l'archive (donnees fraiches) ET index.html
     // (code : filtre, rendu, etc.). Un changement de l'un OU l'autre = reload,
     // sinon les collegues ne voyaient jamais les mises a jour de CODE.
     const [t, c] = await Promise.all([tagOf(archUrl()), tagOf('index.html')]);
-    if (vCode == null && c) vCode = c;                          // 1re base du code
-    if (vSym !== symbol) { vSym = symbol; vTag = t; return; }   // (re)base sur le symbole affiche
+    if (vCode == null && c) vCode = c;                          // base tardive de secours si le seed a echoue
+    if (vSym !== symbol) { vSym = symbol; if (t) vTag = t; return; }   // rebase symbole (vTag seulement si t non-null)
     const archChanged = t && t !== vTag;                        // t null (HEAD KO) => false, pas de faux reload
     const codeChanged = c && c !== vCode;
     if ((!archChanged && !codeChanged) || Date.now() - gonLastTouch <= 60000) return;
@@ -2617,16 +2632,16 @@ if (location.hostname.endsWith('github.io')) {
 load();
 </script>
 <!-- G-ON : moteur POI (modules purs testes) + feature live + rendu -->
-<script src="poi/poi-config.js?v=2"></script>
+<script src="poi/poi-config.js?v=3"></script>
 <script src="poi/poi-score-model.js?v=1"></script>
 <script src="poi/footprint-m15.js?v=2"></script>
 <script src="poi/poi-detector.js?v=3"></script>
 <script src="poi/poi-lifecycle.js?v=5"></script>
 <script src="poi/stream.js?v=1"></script>
-<script src="poi/poi-render.js?v=47"></script>
-<script src="poi/poi-feature.js?v=35"></script>
-<script src="poi/liq-flux.js?v=21"></script>
-<script src="poi/whale-sonar.js?v=26"></script>
-<script src="poi/confluence.js?v=24"></script>
+<script src="poi/poi-render.js?v=48"></script>
+<script src="poi/poi-feature.js?v=36"></script>
+<script src="poi/liq-flux.js?v=22"></script>
+<script src="poi/whale-sonar.js?v=27"></script>
+<script src="poi/confluence.js?v=25"></script>
 </body>
 </html>

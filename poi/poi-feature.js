@@ -102,26 +102,33 @@
   // Archive canonique Antho v1 (BTCUSDT uniquement) : ~9399 POI figes jusqu'a la
   // frontiere d'export. Le live comble entre cette frontiere et maintenant.
   async function loadAnthoV1Archive(ticker, signal) {
+    // Capture timeframeMs MAINTENANT : poiConfig peut passer a null si l'user
+    // change de symbole pendant les retries -> deref null sinon (POI perdus).
+    const tfMs = (poiConfig && poiConfig.timeframeMs) || 15 * 60 * 1000;
     // RETRY avec backoff : un echec transitoire (429/418/coupure reseau/CDN en
     // propagation) ne doit PAS laisser le chart silencieusement incomplet (seuls
-    // les niveaux live). On reessaie jusqu'a obtenir l'archive complete.
-    let response = null, lastErr = null;
+    // les niveaux live). Le PARSE JSON est DANS la boucle : un 200 au corps
+    // tronque (CDN en propagation) leve une SyntaxError -> on retente aussi.
+    let data = null, lastErr = null;
     for (let attempt = 0; attempt < 6; attempt++) {
       if (signal && signal.aborted) throw Object.assign(new Error("aborted"), { name: "AbortError" });
       try {
-        response = await fetch(archivePathFor(ticker), { signal, cache: "no-store" });
-        if (response.ok) break;
-        lastErr = Error(`Archive POI ${ticker} ${response.status}`);
-        response = null;
+        const response = await fetch(archivePathFor(ticker), { signal, cache: "no-store" });
+        if (response.ok) {
+          const parsed = await response.json();   // corps tronque -> SyntaxError -> retry
+          if (parsed && Array.isArray(parsed.pois) && Array.isArray(parsed.columns)) { data = parsed; break; }
+          lastErr = Error("Archive POI corps invalide/partiel");
+        } else {
+          lastErr = Error(`Archive POI ${ticker} ${response.status}`);
+        }
       } catch (e) {
         if (e.name === "AbortError") throw e;
-        lastErr = e;
+        lastErr = e;   // reseau OU SyntaxError (corps partiel) -> retry
       }
       await new Promise((r) => setTimeout(r, Math.min(15000, 1000 * Math.pow(2, attempt))));   // 1,2,4,8,15,15 s
     }
-    if (!response) throw (lastErr || Error(`Archive POI ${ticker} indisponible`));
-    const data = await response.json();
-    const columns = Array.isArray(data.columns) ? data.columns : [];
+    if (!data) throw (lastErr || Error(`Archive POI ${ticker} indisponible`));
+    const columns = data.columns;
     const index = Object.fromEntries(columns.map((name, i) => [name, i]));
     if (data.schemaVersion !== 2 || data.symbol !== ticker || data.timeframe !== "15m" || !Array.isArray(data.pois)) {
       throw Error("Archive POI Antho v1 M15 invalide");
@@ -146,7 +153,7 @@
       return {
         id: `${ticker}-${createdTs}-${direction}-${lowBin}-${highBin}`, symbol: ticker, timeframe: data.timeframe,
         source: data.source, method: "FP_IMBALANCE_FULL_CANDLE", detectorVersion: data.detectorVersion,
-        createdTs, availableAt: createdTs + poiConfig.timeframeMs, direction,
+        createdTs, availableAt: createdTs + tfMs, direction,
         zoneLow: zoneLowNum, zoneHigh: zoneHighNum, entryPrice: Number(row[index.entryPrice]),
         clusterLow, clusterHigh, imbalance: Number(row[index.imbalance]), zoneVolume: Number(row[index.zoneVolume]),
         zoneVolumeShare: Number(row[index.zoneVolumeShare]), fpTimeStart: Number(row[index.fpTimeStart]),
@@ -157,7 +164,7 @@
         status: active ? "ACTIVE_UNTOUCHED" : (row[index.status] === "I" ? "INVALIDATED" : "TOUCHED"),
         firstTouchTs: active || !Number.isFinite(retestTs) ? null : retestTs,
         touchCount: active ? 0 : 1, maxPenetrationPct: 0, lastLifecycleCandleTs: null,
-        statusChangedTs: active ? createdTs + poiConfig.timeframeMs : retestTs,
+        statusChangedTs: active ? createdTs + tfMs : retestTs,
         lifecycleValidAfterTs, provenance: "antho_v1_canonical",
         climax: index.climax != null ? row[index.climax] === 1 : false,
         // Verdict de la regle de retest (SL 0.15% / TP 1%, backfill-outcome) :
@@ -170,7 +177,8 @@
         approachAtr: index.approachAtr != null && row[index.approachAtr] !== null && row[index.approachAtr] !== undefined
           ? Number(row[index.approachAtr]) : null
       };
-    }).filter((p) => Number.isFinite(p.createdTs) && Number.isFinite(p.zoneLow) && Number.isFinite(p.zoneHigh) && p.zoneHigh > p.zoneLow);
+    }).filter((p) => Number.isFinite(p.createdTs) && Number.isFinite(p.zoneLow) && Number.isFinite(p.zoneHigh) && p.zoneHigh > p.zoneLow
+      && Number.isFinite(p.score));   // score NaN -> POI jamais affiche (NaN>=min faux) : on l'exclut proprement
     return { pois: archivePois, cutoff, lifecycleValidAfterTs };
   }
 
@@ -179,6 +187,12 @@
     const response = await fapiFetch(`${FUTURES_KLINES}?${q}`, signal);
     if (!response.ok) throw Error(`Binance Futures REST ${response.status}`);
     const rows = await response.json();
+    // GARDE AVANT TOUTE MUTATION GLOBALE : un changement de symbole pendant le
+    // fetch a aborte ce signal. Sans ce garde, on ecraserait `poiHistory` (et
+    // l'accumulateur) du NOUVEAU symbole avec les bougies de l'ANCIEN -> OHLC du
+    // mauvais symbole, detection/vieillissement faux, POI zombies. (l'ancien
+    // garde etait APRES la mutation = trop tard.)
+    if (signal && signal.aborted) { const e = Error("aborted"); e.name = "AbortError"; throw e; }
     const currentStart = poiAccumulator?.getCurrent()?.startTs ?? Infinity;
     const seeded = rows.slice(0, -1).map((row) => {
       const volume = Number(row[5]), longVolume = Number(row[9]);

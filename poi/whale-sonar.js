@@ -181,7 +181,10 @@
   const radarShown = () => visible && radarCv && radarCv.offsetParent !== null;
 
   function addBlip(side, usd, dim, silent) {
-    if (!shown()) return;
+    // Les blips ne sont RENDUS que par drawRadar (garde radarShown). Si le radar
+    // est masque (media-query <860px) alors que l'overlay reste visible, les
+    // empiler puis shift() a 90 en boucle est du churn jamais dessine.
+    if (!radarShown()) return;
     // orbite 44-58 : hors du logo (42), sous l'anneau externe (60)
     blips.push({ side, dim, born: performance.now(),
       r: dim ? 1.6 : Math.min(6, 2 + Math.log10(Math.max(1, usd / 1e5)) * 2.2),
@@ -348,8 +351,10 @@
 
   /* ---------- boucle ---------- */
   function loop() {
+    // Masque (overlay non affiche) : on STOPPE la boucle rAF au lieu de tourner
+    // a 60 fps a vide ; slowTick la relance quand l'overlay revient.
+    if (!shown()) { rafId = 0; return; }
     rafId = requestAnimationFrame(loop);
-    if (!shown()) return;
     const host = gon.mount.getBoundingClientRect();
     const w = Math.round(host.width), h = Math.round(host.height);
     if (w > 0 && h > 0 && (cv.width !== w || cv.height !== h)) { cv.width = w; cv.height = h; }
@@ -390,6 +395,8 @@
     if (ws && ws.readyState === 1 && lastMsgAt && Date.now() - lastMsgAt > STALL_MS) ws.close();
     // persistance des seuils hors rAF : survit au sonar masque / onglet cache
     if (Date.now() - lastThrSaveAt > 60000) { lastThrSaveAt = Date.now(); saveThr(); }
+    // relance la boucle rAF si l'overlay, masque puis re-affiche, l'avait arretee
+    if (shown() && !rafId) rafId = requestAnimationFrame(loop);
   }
 
   /* ---------- construction ---------- */

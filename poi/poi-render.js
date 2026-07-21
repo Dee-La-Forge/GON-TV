@@ -239,7 +239,10 @@
       // MORT : le trait va de la bougie de DEPART (naissance, x1) a la bougie de
       // FIN (mort, x2). Span REEL, borne a la mort (fini le repli plein-ecran).
       const left = Math.max(0, x1);
-      const right = active ? Math.min(plotW, Math.max(x2, x1 + 2)) : Math.min(plotW, x2);
+      // Largeur MINIMALE aussi pour les morts : un POI ne/mort dans la MEME
+      // bougie (x1===x2, frequent sur TF hauts) aurait right<=left -> invisible.
+      // Le tick de mort reste ancre a Math.round(x2), on ne gagne que ~2px.
+      const right = Math.min(plotW, Math.max(x2, x1 + 2));
       if (right <= 0 || left >= plotW || right <= left) return null;
 
       const hue = HUE[poi.direction] || HUE.long;
@@ -579,8 +582,10 @@
             tags.push({ y: py, price: pe, score: "P·S" + prov.score,
               hue: PROV_HUE[prov.direction] || PROV_HUE.long, active: true, elite: false });
         }
-        // Anti-doublon : un prix deja etiquete au centre ne reapparait pas a droite.
-        drawTags(tags.filter((t) => !centeredPrices.has(t.price)), plotW, paneH);
+        // Anti-doublon : un prix deja etiquete au centre (mort) ne reapparait pas
+        // a droite — SAUF pour un ACTIF (actionnable) au meme prix, qui prime sur
+        // le mort et garde son chip.
+        drawTags(tags.filter((t) => t.active || !centeredPrices.has(t.price)), plotW, paneH);
         drawProvisional(plotW, paneH);
         drawWins(plotW, paneH, pLo, pHi, vis, now);
       } finally {
