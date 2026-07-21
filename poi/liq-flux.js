@@ -40,7 +40,7 @@
     // Visuels UNIQUEMENT quand le panneau est affiche : masque, rien ne les
     // purge (rAF suspendu) et waves croissait sans borne toute la nuit.
     if (panelShown()) {
-      const r = Math.min(15, Math.max(3.5, (Math.log10(usd) - 4.1) * 4.4));
+      const r = Math.min(15, Math.max(4.5, (Math.log10(usd) - 4.1) * 4.4));
       if (orbs.length < 140) {
         const w = fluxCv.width || 130, h = fluxCv.height || 300;
         const x = 12 + Math.random() * Math.max(20, w - 24);
@@ -73,7 +73,7 @@
     if (panelShown() && orbs.length < 140) {
       const w = fluxCv.width || 130, h = fluxCv.height || 300;
       orbs.push({ side, dim: true,
-        r: Math.min(3, Math.max(1.2, (Math.log10(usd) - 3.3) * 0.9)),
+        r: Math.min(4.5, Math.max(2.2, (Math.log10(usd) - 3.3) * 1.15)),
         x: 12 + Math.random() * Math.max(20, w - 24),
         y: side === LONG ? -3 : h + 3, ph: Math.random() * 6.28,
         v: (0.5 + Math.random() * 0.8) * (side === LONG ? 1 : -1) });
@@ -144,9 +144,11 @@
         const c = COLOR[o.side];
         fluxCx.save();
         if (o.dim) {
-          // boule d'ambiance (autre symbole) : petite, tamisee, sans coeur
-          fluxCx.shadowColor = rgba(c, 0.5); fluxCx.shadowBlur = 5;
-          fluxCx.fillStyle = rgba(c, 0.4);
+          // boule d'ambiance (autre symbole) : petite mais plus lumineuse, glow
+          // renforce pour rester lisible a l'ecran (sans coeur blanc, elle reste
+          // subordonnee aux liquidations du symbole courant).
+          fluxCx.shadowColor = rgba(c, 0.85); fluxCx.shadowBlur = 9;
+          fluxCx.fillStyle = rgba(c, 0.65);
           fluxCx.beginPath(); fluxCx.arc(x, o.y, o.r, 0, Math.PI * 2); fluxCx.fill();
         } else {
           fluxCx.strokeStyle = rgba(c, 0.5); fluxCx.lineWidth = Math.max(1.5, o.r * 0.95);
