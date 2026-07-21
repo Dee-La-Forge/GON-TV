@@ -40,7 +40,7 @@
     // Visuels UNIQUEMENT quand le panneau est affiche : masque, rien ne les
     // purge (rAF suspendu) et waves croissait sans borne toute la nuit.
     if (panelShown()) {
-      const r = Math.max(2, (Math.log10(usd) - 4.1) * 3.2);
+      const r = Math.min(15, Math.max(3.5, (Math.log10(usd) - 4.1) * 4.4));
       if (orbs.length < 140) {
         const w = fluxCv.width || 130, h = fluxCv.height || 300;
         const x = 12 + Math.random() * Math.max(20, w - 24);
@@ -149,13 +149,13 @@
           fluxCx.fillStyle = rgba(c, 0.4);
           fluxCx.beginPath(); fluxCx.arc(x, o.y, o.r, 0, Math.PI * 2); fluxCx.fill();
         } else {
-          fluxCx.strokeStyle = rgba(c, 0.35); fluxCx.lineWidth = Math.max(1, o.r * 0.8);
-          fluxCx.beginPath(); fluxCx.moveTo(x, o.y - o.v * 9); fluxCx.lineTo(x, o.y); fluxCx.stroke();
-          fluxCx.shadowColor = rgba(c, 0.95); fluxCx.shadowBlur = 11;
-          fluxCx.fillStyle = rgba(c, 0.9);
+          fluxCx.strokeStyle = rgba(c, 0.5); fluxCx.lineWidth = Math.max(1.5, o.r * 0.95);
+          fluxCx.beginPath(); fluxCx.moveTo(x, o.y - o.v * 13); fluxCx.lineTo(x, o.y); fluxCx.stroke();
+          fluxCx.shadowColor = rgba(c, 1); fluxCx.shadowBlur = 18;
+          fluxCx.fillStyle = rgba(c, 0.95);
           fluxCx.beginPath(); fluxCx.arc(x, o.y, o.r, 0, Math.PI * 2); fluxCx.fill();
-          fluxCx.shadowBlur = 0; fluxCx.fillStyle = "rgba(255,255,255,.95)";
-          fluxCx.beginPath(); fluxCx.arc(x, o.y - o.r * 0.2, Math.max(0.8, o.r * 0.32), 0, Math.PI * 2); fluxCx.fill();
+          fluxCx.shadowBlur = 0; fluxCx.fillStyle = "rgba(255,255,255,.97)";
+          fluxCx.beginPath(); fluxCx.arc(x, o.y - o.r * 0.2, Math.max(1, o.r * 0.36), 0, Math.PI * 2); fluxCx.fill();
         }
         fluxCx.restore();
       }

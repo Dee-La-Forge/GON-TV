@@ -32,7 +32,7 @@
   };
   const W = { active: 0.75, touched: 0.75, dead: 0.75, casingExtra: 1.5 };   // traits fins (spec)
   const DASH = { active: null, touched: [7, 4], dead: [1.5, 3.5] };
-  const TAG_H = 16, TAG_GAP = 3, MAX_LEVELS = 300, DECLUTTER_GAP_PX = 8;
+  const TAG_H = 19, TAG_GAP = 3, MAX_LEVELS = 300, DECLUTTER_GAP_PX = 8;
   // Niveaux d'ELITE (S >= seuil) : laser DORE (charte G-Bot) au lieu du laser
   // directionnel — les meilleurs scores se reperent d'un coup d'oeil.
   const ELITE_SCORE = 90;
@@ -44,8 +44,8 @@
   // ligne de prix permanente (les faibles restent en detail naissance->mort
   // pres de l'evenement). Reduit fortement la densite.
   const GHOST_MIN_SCORE = 90;
-  const PRICE_FONT = "600 10px Consolas, 'Roboto Mono', monospace";
-  const SCORE_FONT = "700 9px Consolas, 'Roboto Mono', monospace";
+  const PRICE_FONT = "600 12px Consolas, 'Roboto Mono', monospace";
+  const SCORE_FONT = "700 11px Consolas, 'Roboto Mono', monospace";
   const CHIP_PAD = 6, CHIP_RULE_GAP = 5;
 
   function hexToRgb(hex) {
@@ -400,7 +400,7 @@
       const xSep = xText + wPrice + CHIP_RULE_GAP;
       ctx.save(); ctx.lineCap = "butt";
       ctx.beginPath();
-      ctx.moveTo(Math.round(xSep) + 0.5, py + 4); ctx.lineTo(Math.round(xSep) + 0.5, py + 12);
+      ctx.moveTo(Math.round(xSep) + 0.5, py + 4); ctx.lineTo(Math.round(xSep) + 0.5, py + TAG_H - 4);
       ctx.strokeStyle = T.chipRule; ctx.lineWidth = 1; ctx.stroke();
       ctx.restore();
       ctx.font = SCORE_FONT; ctx.fillStyle = rgba(hue, scoreAlpha);
