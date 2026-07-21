@@ -214,7 +214,14 @@
       // Semaines : la grille G-Bot est ancree LUNDI (W0 = 345600), pas sur
       // l'epoch — un floor epoch snapperait au jeudi, une barre trop tot.
       if (s % 604800 === 0) return Math.floor((t - 345600) / s) * s + 345600;
-      return Math.floor(t / s) * s;
+      // TF FINS (< 15m) : les timestamps POI sont M15 (900s). Sur un TF qui NE
+      // DIVISE PAS 15m (2m/4m/8m), un FLOOR pose la pastille sur la bougie
+      // PRECEDENTE (ex. 15:15 -> 15:14, une bougie trop tot) : les niveaux a :15
+      // et :45 apparaissaient decales d'une demi-bougie. On prend la 1re bougie
+      // du TF a partir de l'instant M15 (CEIL) -> pastille sur la 1re bougie de
+      // la periode M15, alignee. Sur un TF divisant 15m (1m/3m/5m), ceil == exact.
+      if (s < 900) return Math.ceil(t / s) * s;
+      return Math.floor(t / s) * s;   // TF >= 15m : bougie contenante (floor)
     }
 
     function drawLevel(poi, plotW, now, wantLabel, centeredPrices) {
