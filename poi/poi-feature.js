@@ -53,16 +53,36 @@
   // appel fapi du module, respecte le Retry-After annonce par Binance.
   let poiApiCoolUntil = 0;
   async function fapiFetch(url, signal) {
+    // Retry sur TOUT echec transitoire (429/418 rate-limit, coupure reseau, 5xx)
+    // avec backoff : les niveaux LIVE (seed / bootstrap / aggTrades) ne doivent
+    // pas manquer silencieusement a cause d'un hoquet reseau ou serveur.
+    let lastErr = null;
     for (let attempt = 0; attempt < 6; attempt++) {
       const wait = poiApiCoolUntil - Date.now();
       if (wait > 0) await new Promise((r) => setTimeout(r, Math.min(wait, 60000)));
       if (signal && signal.aborted) { const e = Error("aborted"); e.name = "AbortError"; throw e; }
-      const response = await fetch(url, { signal });
-      if (response.status !== 429 && response.status !== 418) return response;
-      const ra = Number(response.headers.get("retry-after"));
-      poiApiCoolUntil = Date.now() + (Number.isFinite(ra) && ra > 0 ? ra * 1000 : 60000) + 1000;
+      let response;
+      try {
+        response = await fetch(url, { signal });
+      } catch (e) {
+        if (e.name === "AbortError") throw e;
+        lastErr = e;   // erreur reseau : backoff + retry
+        await new Promise((r) => setTimeout(r, Math.min(15000, 1000 * Math.pow(2, attempt))));
+        continue;
+      }
+      if (response.status === 429 || response.status === 418) {
+        const ra = Number(response.headers.get("retry-after"));
+        poiApiCoolUntil = Date.now() + (Number.isFinite(ra) && ra > 0 ? ra * 1000 : 60000) + 1000;
+        continue;
+      }
+      if (response.status >= 500) {   // 5xx transitoire : backoff + retry
+        lastErr = Error(`Binance Futures ${response.status}`);
+        await new Promise((r) => setTimeout(r, Math.min(15000, 1000 * Math.pow(2, attempt))));
+        continue;
+      }
+      return response;   // 2xx, ou 4xx non-retryable (erreur reelle)
     }
-    throw Error("Binance Futures rate-limit persistant");
+    throw (lastErr || Error("Binance Futures rate-limit persistant"));
   }
 
   async function fetchAggTrades(ticker, params, signal) {
@@ -82,8 +102,24 @@
   // Archive canonique Antho v1 (BTCUSDT uniquement) : ~9399 POI figes jusqu'a la
   // frontiere d'export. Le live comble entre cette frontiere et maintenant.
   async function loadAnthoV1Archive(ticker, signal) {
-    const response = await fetch(archivePathFor(ticker), { signal, cache: "no-store" });
-    if (!response.ok) throw Error(`Archive POI ${ticker} ${response.status}`);
+    // RETRY avec backoff : un echec transitoire (429/418/coupure reseau/CDN en
+    // propagation) ne doit PAS laisser le chart silencieusement incomplet (seuls
+    // les niveaux live). On reessaie jusqu'a obtenir l'archive complete.
+    let response = null, lastErr = null;
+    for (let attempt = 0; attempt < 6; attempt++) {
+      if (signal && signal.aborted) throw Object.assign(new Error("aborted"), { name: "AbortError" });
+      try {
+        response = await fetch(archivePathFor(ticker), { signal, cache: "no-store" });
+        if (response.ok) break;
+        lastErr = Error(`Archive POI ${ticker} ${response.status}`);
+        response = null;
+      } catch (e) {
+        if (e.name === "AbortError") throw e;
+        lastErr = e;
+      }
+      await new Promise((r) => setTimeout(r, Math.min(15000, 1000 * Math.pow(2, attempt))));   // 1,2,4,8,15,15 s
+    }
+    if (!response) throw (lastErr || Error(`Archive POI ${ticker} indisponible`));
     const data = await response.json();
     const columns = Array.isArray(data.columns) ? data.columns : [];
     const index = Object.fromEntries(columns.map((name, i) => [name, i]));
