@@ -37,6 +37,9 @@
   // directionnel — les meilleurs scores se reperent d'un coup d'oeil.
   const ELITE_SCORE = 90;
   const DEAD_GAP_PX = TAG_H + 3;   // chips morts centres : jamais de chevauchement
+  // Ligne FANTOME des morts (pleine largeur, au prix) : tres pale, juste assez
+  // pour rester trouvable en scrollant sans encombrer ni "traverser" fort.
+  const GHOST_ALPHA = { dark: 0.10, light: 0.14 };
   const PRICE_FONT = "600 10px Consolas, 'Roboto Mono', monospace";
   const SCORE_FONT = "700 9px Consolas, 'Roboto Mono', monospace";
   const CHIP_PAD = 6, CHIP_RULE_GAP = 5;
@@ -248,6 +251,9 @@
       if (elite) hasEliteVisible = true;
       const glowScale = elite ? 1.7 * pulseK : active ? 1 : 0;
       const lw = elite ? width + 0.75 : width;   // trait elite plus epais : hierarchie au premier regard
+      // (La LIGNE FANTOME pleine largeur des morts est dessinee dans une passe
+      // dediee AVANT, independante du temps — voir drawGhostLines. Ici on ne
+      // trace que la portee reelle naissance->mort, nette.)
       laserHline(left, right, y, lw, hue, lineAlpha, dash, glowScale, elite);
 
       const ySnap = Math.round(y) + 0.5;
@@ -490,6 +496,34 @@
       try {
         ctx.scale(dpr, dpr);
         ctx.beginPath(); ctx.rect(0, 0, plotW, paneH); ctx.clip();
+
+        // --- PASSE FANTOME : ligne pleine largeur au PRIX de chaque niveau MORT,
+        // INDEPENDANTE DU TEMPS (comme un support/resistance). Un mort reste
+        // trouvable tant que son prix est visible -> il ne disparait plus a la
+        // molette quand sa vie naissance->mort sort de la fenetre. Dedupliquee
+        // par prix (un seul trait par niveau de prix, pas un par POI) : leger et
+        // sans surcharge. Tres pale ; le detail naissance->mort est trace apres.
+        if (showConsumed) {
+          const ghostSeen = new Set();
+          ctx.save(); ctx.lineCap = "butt"; ctx.setLineDash(DASH.dead); ctx.lineWidth = W.dead;
+          for (const poi of pois) {
+            if (poi.status === "ACTIVE_UNTOUCHED") continue;
+            if (climaxOnly && !poi.climax) continue;
+            if ((poi.score || 0) < minScore) continue;
+            const lvl = refPrice(poi);
+            if (!(lvl >= pLo && lvl <= pHi)) continue;
+            const key = Math.round(lvl * 1e6);
+            if (ghostSeen.has(key)) continue;
+            ghostSeen.add(key);
+            const y = gon.priceToY(lvl);
+            if (y == null || !isFinite(y)) continue;
+            const yg = Math.round(y) + 0.5;
+            ctx.beginPath(); ctx.moveTo(0, yg); ctx.lineTo(plotW, yg);
+            ctx.strokeStyle = rgba(HUE[poi.direction] || HUE.long, GHOST_ALPHA[T.mode]); ctx.stroke();
+          }
+          ctx.restore();
+        }
+
         let shown = [];
         for (const poi of pois) {
           if (climaxOnly && !poi.climax) continue;   // vue climax : bougies a volume dominant
@@ -516,10 +550,13 @@
           if (!clash) { arr.push(poi); arrY.push(y); }
         }
         const maxTags = Math.max(4, Math.floor((paneH - 4) / (TAG_H + TAG_GAP)));
+        // Le declutter (keptLive/keptDead) ne decide QUE des LABELS a afficher
+        // (anti-chevauchement de texte). Les LIGNES, elles, se dessinent TOUJOURS
+        // pour TOUS les niveaux en vue : un niveau ne doit jamais etre masque en
+        // entier selon le zoom -> sinon il "reapparait" en dezoomant (bug).
         const labelled = new Set(keptLive.slice(0, maxTags).map((p) => p.id));
         keptDead.forEach((p) => labelled.add(p.id));
-        shown = keptDead.concat(keptLive);
-        shown.sort((a, b) => rank(a) - rank(b));   // non-actifs d'abord : leurs prix centres sont connus avant les tags
+        shown.sort((a, b) => rank(a) - rank(b));   // morts d'abord (labels ancres) puis vivants (colonne droite)
         const tags = [];
         const centeredPrices = new Set();
         for (const poi of shown) { const t = drawLevel(poi, plotW, now, labelled.has(poi.id), centeredPrices); if (t) tags.push(t); }
