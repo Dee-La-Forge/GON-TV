@@ -293,12 +293,24 @@
   // dans la vie de l'app (entree = POI detecte, ou null si aucun). Le lifecycle
   // n'est PAS cache (il depend des bougies suivantes) : il est rejoue au load.
   const poiBootCacheKey = (ticker) => `gon.poi.bootcache.${ticker}`;
-  function loadBootCache(ticker) {
+  function loadBootCacheLS(ticker) {
     try {
       const raw = JSON.parse(localStorage.getItem(poiBootCacheKey(ticker)) || "null");
       if (!raw || raw.version !== 2 || raw.binSize !== poiConfig.binSize) return {};   // v2 : entrees avec flag climax
       return raw.entries || {};
     } catch (_) { return {}; }
+  }
+  async function loadBootCache(ticker) {
+    // Tiroir IndexedDB d'abord (quota ~100x, plus de purges croisees entre
+    // symboles) ; migration naturelle : lecture localStorage en repli.
+    const kv = gon.idbKV;
+    if (kv) {
+      try {
+        const raw = await kv.get("poi.bootcache." + ticker);
+        if (raw && raw.version === 2 && poiConfig && raw.binSize === poiConfig.binSize) return raw.entries || {};
+      } catch (_) {}
+    }
+    return loadBootCacheLS(ticker);
   }
   function saveBootCache(ticker, entries) {
     // Une continuation ABORTEE (changement de symbole pendant un await) peut
@@ -306,12 +318,26 @@
     // cache de l'ancien serait serialise avec le mauvais binSize et jete au
     // prochain chargement. On ne sauve que si la config correspond au ticker.
     if (!poiConfig || poiConfig.symbol !== ticker) return;
+    // prune : garde 3 jours max, et seulement au-dela de la frontiere d'archive
+    const minTs = Math.max(poiHistoricalCutoff + 1, Date.now() - 3 * 24 * 3600 * 1000);
+    const pruned = {};
+    for (const [k, v] of Object.entries(entries)) if (Number(k) >= minTs) pruned[k] = v;
+    const rec = { version: 2, binSize: poiConfig.binSize, entries: pruned };
+    const kv = gon.idbKV;
+    if (kv) {
+      // IndexedDB : ecriture riche asynchrone ; succes -> on libere la vieille
+      // copie localStorage (migration), echec -> repli localStorage ci-dessous.
+      kv.put("poi.bootcache." + ticker, rec).then(ok => {
+        if (ok !== undefined) { try { localStorage.removeItem(poiBootCacheKey(ticker)); } catch (_) {} }
+        else saveBootCacheLS(ticker, rec);
+      }).catch(() => saveBootCacheLS(ticker, rec));
+      return;
+    }
+    saveBootCacheLS(ticker, rec);
+  }
+  function saveBootCacheLS(ticker, rec) {
     try {
-      // prune : garde 3 jours max, et seulement au-dela de la frontiere d'archive
-      const minTs = Math.max(poiHistoricalCutoff + 1, Date.now() - 3 * 24 * 3600 * 1000);
-      const pruned = {};
-      for (const [k, v] of Object.entries(entries)) if (Number(k) >= minTs) pruned[k] = v;
-      localStorage.setItem(poiBootCacheKey(ticker), JSON.stringify({ version: 2, binSize: poiConfig.binSize, entries: pruned }));
+      localStorage.setItem(poiBootCacheKey(ticker), JSON.stringify(rec));
     } catch (error) {
       // quota plein (20 bootcaches x plusieurs symboles + dessins G-Bot) : on
       // libere les bootcaches des AUTRES symboles avant de re-tenter — sinon
@@ -335,7 +361,8 @@
     // couverture complete archive -> maintenant. Le cache rend les rechargements
     // gratuits ; POI_BOOTSTRAP_MAX_CANDLES n'est qu'un garde-fou (24h).
     const fromTs = poiHistoricalCutoff > 0 ? poiHistoricalCutoff + 1 : Date.now() - POI_RAW_WINDOW;
-    const cache = loadBootCache(ticker);
+    const cache = await loadBootCache(ticker);
+    if (signal && signal.aborted) throw Object.assign(new Error("aborted"), { name: "AbortError" });   // garde post-await (IDB)
     const existingStarts = new Set(pois.map((p) => Number(p.createdTs)));
     const candidates = poiHistory
       .filter((c) => c.startTs >= fromTs && !existingStarts.has(c.startTs) && isPoiBootstrapCandidate(c))

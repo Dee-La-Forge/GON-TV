@@ -546,7 +546,21 @@ function readIdx() {   // index LRU des contextes persistés, réparé si corrom
   if (!Array.isArray(idx)) idx = [];
   return idx;
 }
-function persistBars() {
+function persistBars(lastGasp) {
+  if (!candles.length || !ctxFresh()) return;
+  // Tiroir profond IndexedDB en vie courante ; pagehide (lastGasp) reste sur le
+  // localStorage SYNCHRONE — une écriture IDB peut être tuée avec la page.
+  if (idb && !lastGasp) {
+    if (isSecTf() && candles.length > IDB_BARS_CAP) return;   // secondes tronquées : curseur incohérent, on ne persiste que si tout tient
+    const dKey = symbol + '|' + tf;
+    const rec = { v: BARS_SCHEMA, t: Date.now(), atStart: oldestDone && candles.length <= IDB_BARS_CAP,
+      fi: firstTradeId, lm: lastTradeMs, la: lastAggId, b: candles.slice(-IDB_BARS_CAP) };
+    idbPut('bars', dKey, rec).then(ok => { if (ok === undefined) persistBarsLS(); else idbPruneBars(dKey); });
+    return;
+  }
+  persistBarsLS();
+}
+function persistBarsLS() {
   if (!candles.length || !ctxFresh()) return;
   // secondes tronquées : firstTradeId ne correspondrait plus à candles[0] → on ne persiste que si tout tient
   if (isSecTf() && candles.length > BARS_CAP) return;
@@ -592,25 +606,83 @@ function persistBars() {
     } catch {}
   }
 }
-function loadPersisted() {   // renvoie {b, atStart, fi, lm, la} sain et pas trop périmé, sinon null
+function validPersisted(o) {   // {b, atStart, fi, lm, la} sain et pas trop périmé ? (commun localStorage / IndexedDB)
+  if (!o || o.v !== BARS_SCHEMA || !Array.isArray(o.b) || !o.b.length) return false;
+  // secondes : curseur trade indispensable (le poll ne s'amorce pas sans) — refuser un enregistrement sans 'la' valide
+  if (isSecTf() && !(typeof o.la === 'number' && o.la > 0)) return false;
+  // trop vieux = trop de trou à combler : rechargement frais (secondes très court, klines borné à fillGap ET à 30 j)
+  const maxAge = isSecTf() ? 90000 : Math.min(18000 * TFSEC[tfDef().src] * 1000, 30 * 86400e3);
+  const age = Date.now() - o.t;
+  if (typeof o.t !== 'number' || age < 0 || age > maxAge) return false;   // age < 0 : horloge reculée → rejeter
+  let prev = -Infinity;   // validation profonde : OHLCV numérique, temps STRICTEMENT croissant
+  for (const c of o.b) {
+    if (!c || !numOk(c.time) || c.time <= prev || !numOk(c.open) || !numOk(c.high) || !numOk(c.low) || !numOk(c.close) || !numOk(c.volume)) return false;
+    prev = c.time;
+  }
+  return true;
+}
+function loadPersisted() {   // localStorage : renvoie l'enregistrement sain, sinon null
   try {
     const raw = localStorage.getItem(barsKey(symbol, tf));
     if (!raw) return null;
     const o = JSON.parse(raw);
-    if (!o || o.v !== BARS_SCHEMA || !Array.isArray(o.b) || !o.b.length) return null;
-    // secondes : curseur trade indispensable (le poll ne s'amorce pas sans) — refuser un enregistrement sans 'la' valide
-    if (isSecTf() && !(typeof o.la === 'number' && o.la > 0)) return null;
-    // trop vieux = trop de trou à combler : rechargement frais (secondes très court, klines borné à fillGap ET à 30 j)
-    const maxAge = isSecTf() ? 90000 : Math.min(18000 * TFSEC[tfDef().src] * 1000, 30 * 86400e3);
-    const age = Date.now() - o.t;
-    if (typeof o.t !== 'number' || age < 0 || age > maxAge) return null;   // age < 0 : horloge reculée → rejeter
-    let prev = -Infinity;   // validation profonde : OHLCV numérique, temps STRICTEMENT croissant
-    for (const c of o.b) {
-      if (!c || !numOk(c.time) || c.time <= prev || !numOk(c.open) || !numOk(c.high) || !numOk(c.low) || !numOk(c.close) || !numOk(c.volume)) return null;
-      prev = c.time;
-    }
-    return o;
+    return validPersisted(o) ? o : null;
   } catch { return null; }
+}
+
+/* ---- IndexedDB : tiroir PROFOND des bougies (« mode TradingView » local) ----
+   Même philosophie que localStorage (données sur TON disque, cloisonnées par
+   site) mais ~100× plus grand et asynchrone : TOUS les contextes visités,
+   IDB_BARS_CAP bougies chacun → naviguer entre TF = restauration locale + mini
+   rattrapage, quasi plus de requêtes Binance. localStorage reste le REPLI
+   (IDB indisponible) et la DERNIÈRE CHANCE au pagehide (une écriture IDB
+   asynchrone peut mourir avec la page) ; au chargement on prend le plus FRAIS
+   des deux. LRU + âge via un index léger dans le store 'kv' (jamais de scan
+   des gros enregistrements). */
+const IDB_BARS_CAP = 20000, IDB_CTX_MAX = 64, IDB_MAX_AGE = 14 * 86400e3;
+let idb = null;   // connexion ouverte, null = repli localStorage
+const idbOpen = new Promise(res => {
+  try {
+    const rq = indexedDB.open('gon-cache', 1);
+    rq.onupgradeneeded = () => {
+      const db = rq.result;
+      if (!db.objectStoreNames.contains('bars')) db.createObjectStore('bars');
+      if (!db.objectStoreNames.contains('kv')) db.createObjectStore('kv');
+    };
+    rq.onsuccess = () => { idb = rq.result; idb.onversionchange = () => { try { idb.close(); } catch {} idb = null; }; res(); };
+    rq.onerror = () => res();
+    rq.onblocked = () => res();
+  } catch { res(); }
+});
+const idbReq = (store, mode, op) => new Promise(res => {
+  if (!idb) return res(undefined);
+  try {
+    const rq = op(idb.transaction(store, mode).objectStore(store));
+    rq.onsuccess = () => res(rq.result);
+    rq.onerror = () => res(undefined);
+  } catch { res(undefined); }
+});
+const idbGet = (store, key) => idbReq(store, 'readonly', os => os.get(key));
+const idbPut = (store, key, val) => idbReq(store, 'readwrite', os => os.put(val, key));
+const idbDel = (store, key) => idbReq(store, 'readwrite', os => os.delete(key));
+async function idbPruneBars(curKey) {   // LRU IDB_CTX_MAX + âge 14 j, index léger 'bars.idx'
+  const idx = (await idbGet('kv', 'bars.idx')) || {};
+  idx[curKey] = Date.now();
+  let live = Object.keys(idx).filter(k => k === curKey || Date.now() - idx[k] <= IDB_MAX_AGE);
+  const dead = Object.keys(idx).filter(k => !live.includes(k));
+  live.sort((a, b) => idx[a] - idx[b]);
+  while (live.length > IDB_CTX_MAX) dead.push(live.shift());   // curKey = plus récent → jamais évincé
+  for (const k of dead) idbDel('bars', k);
+  const clean = {}; for (const k of live) clean[k] = idx[k];
+  idbPut('kv', 'bars.idx', clean);
+}
+async function loadPersistedDeep() {   // IDB (profond) vs localStorage (dernière chance pagehide) : le plus FRAIS gagne
+  await idbOpen;
+  const ls = loadPersisted();
+  if (!idb) return ls;
+  const o = await idbGet('bars', symbol + '|' + tf);
+  if (validPersisted(o) && (!ls || o.t >= ls.t)) return o;
+  return ls;
 }
 let dataCtx = '';   // contexte des candles chargées ; ≠ symbol|tf courant pendant un backoff = données périmées
 const ctxFresh = () => dataCtx === symbol + '|' + tf;
@@ -898,7 +970,7 @@ addEventListener('pagehide', () => {   // flush des écritures débouncées : F5
   clearTimeout(saveTimer); clearTimeout(themeTimer);
   try { localStorage.setItem('orion-draw-' + symbol, JSON.stringify(drawings)); } catch {}
   lsSet('orion-theme', JSON.stringify(theme));
-  if (!replay) persistBars();   // bougies du contexte courant sur disque → rechargement instantané
+  if (!replay) persistBars(true);   // bougies du contexte courant sur disque (localStorage SYNCHRONE : dernière chance) → rechargement instantané
 });
 let alertBarT = null, alertSeenHi = null, alertSeenLo = null;   // extrêmes DÉJÀ VUS du bar de tête (anti-rétroactif R1)
 function refreshTop() {
@@ -1062,7 +1134,7 @@ async function load(keepZoom = false, attempt = 0) {
   try {
     let k, fromCache = false;
     const cached = barCache.get(symbol + '|' + tf);
-    const disk = cached ? null : loadPersisted();   // disque : uniquement si pas en mémoire vive
+    const disk = cached ? null : await loadPersistedDeep();   // disque (IDB profond ou localStorage, le plus frais) : uniquement si pas en mémoire vive
     if (cached && cached.candles.length) {   // TF déjà visité : zéro réseau, rattrapage du trou après affichage
       barCache.delete(symbol + '|' + tf);
       k = cached.candles;
@@ -2667,6 +2739,12 @@ window.__gon = {
   // series.data() de LWC re-matérialise tout le tableau à chaque appel, ce qui
   // coûtait jusqu'à ~1,5 M objets/s dans anchorSec (miss par frame).
   dataNow,
+  // Tiroir clé-valeur IndexedDB partagé (bootcache POI…) : get/put asynchrones,
+  // undefined = IDB indisponible (les modules gardent leur repli localStorage).
+  idbKV: {
+    get: k => idbOpen.then(() => idbGet('kv', k)),
+    put: (k, v) => idbOpen.then(() => idbPut('kv', k, v)),
+  },
   // G-ON : ouverture de bougie de la grille COURANTE (epoch / lundi W0 / mois
   // calendaire). Source UNIQUE du snap des pastilles POI cote rendu — plus de
   // grille reimplementee a resynchroniser (le mensuel calendaire notamment).
@@ -2762,7 +2840,7 @@ if ('serviceWorker' in navigator && location.hostname.endsWith('github.io')) nav
 <script src="poi/poi-lifecycle.js?v=7"></script>
 <script src="poi/stream.js?v=1"></script>
 <script src="poi/poi-render.js?v=68"></script>
-<script src="poi/poi-feature.js?v=41"></script>
+<script src="poi/poi-feature.js?v=42"></script>
 <script src="poi/liq-flux.js?v=29"></script>
 <script src="poi/whale-sonar.js?v=28"></script>
 <script src="poi/confluence.js?v=27"></script>
