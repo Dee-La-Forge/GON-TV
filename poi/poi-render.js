@@ -153,11 +153,12 @@
       // peut etre jusqu'a un bucket a droite de l'ancre sur les TF hauts —
       // culler dessus fait disparaitre des niveaux visibles au bord droit.
       const startSec = anchorSec(poi, poi.createdTs, true);
-      const active = poi.status === "ACTIVE_UNTOUCHED";
+      // VIVANT au rendu = ACTIF ou TOUCHE non terminal (trait jusqu'au bord droit).
+      const alive = poi.status === "ACTIVE_UNTOUCHED" || poi.status === "TOUCHED";
       // Fallback aligne sur drawLevel (endMs ?? now) : un POI mort sans champ
       // de touche est DESSINE jusqu'a maintenant — le culler a createdTs le
       // ferait disparaitre des qu'on scrolle sa bougie de naissance hors ecran.
-      const endSec = active ? now / 1000 : anchorSec(poi, poi.firstTouchTs ?? poi.statusChangedTs ?? now);
+      const endSec = alive ? now / 1000 : anchorSec(poi, poi.firstTouchTs ?? poi.statusChangedTs ?? now);
       return startSec <= vis.to && Math.max(endSec, startSec) >= vis.from;
     }
 
@@ -304,7 +305,12 @@
       const yOpp = oppPrice == null ? null : gon.priceToY(oppPrice);
       if (yEntry == null && yOpp == null) return null;
       const active = poi.status === "ACTIVE_UNTOUCHED";
-      // Origine du trait (ACTIF comme MORT) : la BOUGIE DE NAISSANCE (createdTs),
+      // TOUCHE non terminal : le moteur le suit toujours (retestable) -> rendu
+      // VIVANT tirete jusqu'au bord droit + chip en colonne de droite, avec une
+      // marque de touche sur sa bougie. Seuls MITIGATED/INVALIDATED sont morts.
+      const touched = poi.status === "TOUCHED";
+      const alive = active || touched;
+      // Origine du trait (VIVANT comme MORT) : la BOUGIE DE NAISSANCE (createdTs),
       // sur toutes les TF. Decision Meddy : la pastille au bout du trait doit
       // atteindre la bougie qui lui appartient. (Les variantes availableAt /
       // fin-de-gap posaient l'origine APRES la naissance — jusqu'a DANS LE FUTUR
@@ -314,14 +320,14 @@
       if (x1 == null || !isFinite(x1)) x1 = gon.timeToX(anchorSec(poi, poi.availableAt, true));
       if (x1 == null || !isFinite(x1)) return null;
 
-      const endMs = active ? now : (poi.firstTouchTs ?? poi.statusChangedTs ?? now);
-      let x2 = active ? plotW : gon.timeToX(anchorSec(poi, endMs));
-      if (active && (x2 == null || !isFinite(x2))) x2 = plotW;
+      const endMs = alive ? now : (poi.firstTouchTs ?? poi.statusChangedTs ?? now);
+      let x2 = alive ? plotW : gon.timeToX(anchorSec(poi, endMs));
+      if (alive && (x2 == null || !isFinite(x2))) x2 = plotW;
       // Niveau MORT : trait BORNE. Une queue pointillee qui se termine PILE sur
       // la bougie de mort (x2) et remonte au plus DEAD_TAIL_PX vers la gauche
       // (ou la naissance si plus proche). Fini le trait plein-ecran qui balaie
       // toutes les bougies et le repli sur plotW (source des labels alignes).
-      if (!active && (x2 == null || !isFinite(x2))) return null;   // mort non placable -> rien (plus de repli plotW)
+      if (!alive && (x2 == null || !isFinite(x2))) return null;   // mort non placable -> rien (plus de repli plotW)
       // MORT : le trait va de la bougie de DEPART (naissance, x1) a la bougie de
       // FIN (mort, x2). Span REEL, borne a la mort (fini le repli plein-ecran).
       const left = Math.max(0, x1);
@@ -333,20 +339,18 @@
 
       const hue = HUE[poi.direction] || HUE.long;
       const y = yEntry != null ? yEntry : yOpp;
-      // DEUX ETATS VISUELS SEULEMENT : VIVANT (plein) ou MORT (pointille fin).
-      // Les distinctions internes touched / mitigated / invalidated existent
-      // toujours dans le moteur (stats de perf, verdicts win), mais ne changent
-      // PLUS l'apparence a l'ecran — un mort est un mort, un seul style.
-      const lineAlpha = active ? ALPHA.lineActive : T.lineDeadAlpha;
-      const width = active ? W.active : W.dead;
-      const dash = active ? DASH.active : DASH.dead;
+      // TROIS ETATS VISUELS : VIVANT (plein), TOUCHE-ENCORE-ACTIF (tirete,
+      // jusqu'au bord droit) et MORT (pointille fin, borne naissance->mort).
+      const lineAlpha = active ? ALPHA.lineActive : touched ? ALPHA.lineTouched : T.lineDeadAlpha;
+      const width = active ? W.active : touched ? W.touched : W.dead;
+      const dash = active ? DASH.active : touched ? DASH.touched : DASH.dead;
       // Laser : plein feu sur les actifs, eteint sur les morts. Le laser reste
       // DIRECTIONNEL (bleu/rouge) pour tous — les elites (S>=90) tirent un fluo
       // PLUS INTENSE (pas d'or sur la ligne : lisibilite long/short d'abord) ;
       // leur or vit sur pastille + chip.
       const elite = active && Number(poi.score) >= ELITE_SCORE;
       if (elite) hasEliteVisible = true;
-      const glowScale = elite ? 1.7 * pulseK : active ? 1 : 0;
+      const glowScale = elite ? 1.7 * pulseK : active ? 1 : touched ? 0.45 : 0;
       const lw = elite ? width + 0.75 : width;   // trait elite plus epais : hierarchie au premier regard
       // (La LIGNE FANTOME pleine largeur des morts est dessinee dans une passe
       // dediee AVANT, independante du temps — voir drawGhostLines. Ici on ne
@@ -355,14 +359,26 @@
 
       const ySnap = Math.round(y) + 0.5;
       const deadMarkA = T.lineDeadAlpha + 0.25;   // bouts un peu plus francs que le trait
-      if (active) {
-        // Point d'ORIGINE actif : disque chaud + anneau de gainage.
+      if (alive) {
+        // Point d'ORIGINE vivant : disque chaud + anneau de gainage.
         if (x1 >= 0 && x1 <= plotW) {
           if (glowScale > 0) { ctx.shadowColor = rgba(hue, 0.9); ctx.shadowBlur = 10 * glowScale; }
           ctx.beginPath(); ctx.arc(x1, ySnap, 2.5, 0, Math.PI * 2);
           ctx.fillStyle = glowScale > 0 ? rgba(tint(hue, 0.45), lineAlpha) : rgba(hue, lineAlpha);
           ctx.fill(); ctx.shadowBlur = 0;
           ctx.lineWidth = 1.5; ctx.strokeStyle = T.casing; ctx.stroke();
+        }
+        // TOUCHE encore actif : marque de touche sur sa bougie (ancre raffinee
+        // v62 : bougie qui croise la ligne d'entree) — le niveau continue apres.
+        if (touched && poi.firstTouchTs) {
+          const xT = gon.timeToX(anchorSec(poi, poi.firstTouchTs));
+          if (xT != null && isFinite(xT) && xT > 0 && xT < plotW) {
+            ctx.save(); ctx.lineCap = "butt";
+            ctx.beginPath();
+            ctx.moveTo(Math.round(xT) + 0.5, ySnap - 4); ctx.lineTo(Math.round(xT) + 0.5, ySnap + 4);
+            ctx.strokeStyle = rgba(hue, 0.9); ctx.lineWidth = 1.25; ctx.stroke();
+            ctx.restore();
+          }
         }
       } else {
         // MORT : marqueur aux DEUX bouts du trait, sur leurs bougies exactes.
@@ -385,7 +401,7 @@
       if (!Number.isFinite(poi.score) || !wantLabel) return null;
       const price = entryPrice != null ? entryPrice : oppPrice;
       // (elite est reporte sur le chip de droite via une pastille or)
-      if (!active) {
+      if (!alive) {
         // Niveaux MORTS : label CENTRE sur le niveau, au MILIEU de sa vie
         // (naissance -> mort). Le centre = milieu de deux bougies FIXES, donc il
         // glisse avec le graphe au scroll (stable). Si ce centre sort de l'ecran,
@@ -605,7 +621,7 @@
           const ghostSeen = new Set();
           ctx.save(); ctx.lineCap = "butt"; ctx.setLineDash(DASH.dead); ctx.lineWidth = W.dead;
           for (const poi of pois) {
-            if (poi.status === "ACTIVE_UNTOUCHED") continue;
+            if (poi.status === "ACTIVE_UNTOUCHED" || poi.status === "TOUCHED") continue;   // fantomes = morts terminaux seulement
             if (climaxOnly && !poi.climax) continue;
             if ((poi.score || 0) < Math.max(deadMinScore, GHOST_MIN_SCORE)) continue;   // fantome = morts a score eleve
             const lvl = refPrice(poi);
@@ -625,7 +641,9 @@
         let shown = [];
         for (const poi of pois) {
           if (climaxOnly && !poi.climax) continue;   // vue climax : bougies a volume dominant
-          const isDead = poi.status !== "ACTIVE_UNTOUCHED";
+          // MORT = terminal seulement (MITIGATED/INVALIDATED) : un TOUCHE non
+          // terminal est encore actif -> regime des vivants (rendu + seuils).
+          const isDead = poi.status !== "ACTIVE_UNTOUCHED" && poi.status !== "TOUCHED";
           // Mort recent (live) : visible partout, au seuil du curseur.
           const recentDead = isDead && now - (poi.firstTouchTs ?? poi.statusChangedTs ?? 0) < RECENT_DEAD_MS;
           if ((poi.score || 0) < (isDead ? (recentDead ? minScore : deadMinScore) : minScore)) continue;   // seuils separes morts/vivants
@@ -641,12 +659,10 @@
         for (const poi of shown) {
           const y = gon.priceToY(refPrice(poi));
           if (y == null || !isFinite(y)) continue;
-          // "dead" au sens du RENDU (chip centre) = tout niveau non-actif, y
-          // compris TOUCHED : drawLevel rend TOUCHED comme un mort (chip centre,
-          // hauteur TAG_H). L'ancien `rank===0` mettait TOUCHED dans liveY avec un
-          // gap 8px alors que son chip centre (16px) exige le gap DEAD_GAP_PX(19)
-          // -> chips de touches qui se chevauchaient. On aligne sur le rendu.
-          const dead = poi.status !== "ACTIVE_UNTOUCHED";
+          // "dead" au sens du RENDU (chip centre) = TERMINAL seulement : un
+          // TOUCHE non terminal est rendu VIVANT (chip en colonne de droite,
+          // gap 8px) — seul le mort au chip centre exige DEAD_GAP_PX.
+          const dead = poi.status !== "ACTIVE_UNTOUCHED" && poi.status !== "TOUCHED";
           const arr = dead ? keptDead : keptLive;
           const arrY = dead ? deadY : liveY;
           const gap = dead ? DEAD_GAP_PX : DECLUTTER_GAP_PX;
