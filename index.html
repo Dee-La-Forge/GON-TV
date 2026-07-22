@@ -1166,7 +1166,16 @@ function startPoll(seq) {
   syncClock();
   let backoff = 0, ticks = 0, inFlight = false, fails = 0;
   const failed = () => { if (++fails >= 3 && seq === loadSeq) $('dot').classList.remove('live'); };
+  // Revue (R1×R2) : des ticks de poll MANQUÉS (veille OS, gel machine) = le
+  // territoire de mèche accumulé du bar de tête est HISTORIQUE. Le flag est
+  // LATCHÉ (un early-return backoff/inFlight ne doit pas le perdre) et consommé
+  // au premier lot appliqué : branch klines muette via gapFilling, comme le
+  // rattrapage secondes d'à côté.
+  let pollLast = 0, pollSlept = false;
   pollTimer = setInterval(async () => {
+    const nowT = Date.now();
+    if (pollLast && nowT - pollLast > 15000) pollSlept = true;   // ticks manqués = veille
+    pollLast = nowT;
     if (seq !== loadSeq || inFlight) return;             // sérialise : pas de réponses hors ordre
     if (replay || !candles.length) return;
     if (backoff > 0) { backoff--; return; }              // recul après erreur (429, réseau…)
@@ -1194,7 +1203,11 @@ function startPoll(seq) {
           else applyTrades(k);   // lot court ET frais = LIVE : les alertes tirent normalement
         }
       }
+      else if (pollSlept) {   // réveil : le range accumulé du bar de tête ne doit pas sonner (alertes rétroactives)
+        gapFilling = true; try { k.slice(-2).forEach(x => applyBar(x)); } finally { gapFilling = false; }
+      }
       else k.slice(-2).forEach(x => applyBar(x));  // seau le plus ancien du rollup potentiellement partiel : écarté
+      pollSlept = false;   // territoire historique consommé muet, le prochain tick ré-arme
     } catch { backoff = 5; failed(); }
     finally { inFlight = false; }
   }, 2000);
@@ -1266,7 +1279,18 @@ function startWs(attempt = 0) {
         const k = d.k;
         const sb = { time: k.t / 1000, open: +k.o, high: +k.h, low: +k.l, close: +k.c, volume: +k.v };
         const df = tfDef();
-        if ((df.fact || 1) === 1) applyBar(sb);
+        if ((df.fact || 1) === 1) {
+          // Revue : le kline est un SNAPSHOT (cadence 250 ms) qui peut précéder un
+          // aggTrade déjà appliqué inline — jamais RÉTRÉCIR le bar de tête (le
+          // chemin composé se protège déjà avec Math.max/min l.suivantes), sinon
+          // alertSeenHi/Lo régressent → double bip sur la même mèche.
+          const lastB = candles[candles.length - 1];
+          if (lastB && sb.time === lastB.time) {
+            sb.high = Math.max(lastB.high, sb.high);
+            sb.low = Math.min(lastB.low, sb.low);
+          }
+          applyBar(sb);
+        }
         else {   // TF agrégé : la bougie source alimente le seau courant
           const bt = bucketStart(sb.time), last = candles[candles.length - 1];
           if (!last) return;
@@ -2640,6 +2664,10 @@ window.__gon = {
   get replay() { return !!replay; },   // les modules masquent les infos "futures" (verdicts ✦) en replay
   priceToY: p => series.priceToCoordinate(p),
   timeToX: xOf,
+  // Revue : bougies PAR RÉFÉRENCE (live = candles, replay = tranche mémoïsée) —
+  // series.data() de LWC re-matérialise tout le tableau à chaque appel, ce qui
+  // coûtait jusqu'à ~1,5 M objets/s dans anchorSec (miss par frame).
+  dataNow,
   // G-ON : ouverture de bougie de la grille COURANTE (epoch / lundi W0 / mois
   // calendaire). Source UNIQUE du snap des pastilles POI cote rendu — plus de
   // grille reimplementee a resynchroniser (le mensuel calendaire notamment).
@@ -2732,12 +2760,12 @@ if ('serviceWorker' in navigator && location.hostname.endsWith('github.io')) nav
 <script src="poi/poi-score-model.js?v=1"></script>
 <script src="poi/footprint-m15.js?v=2"></script>
 <script src="poi/poi-detector.js?v=3"></script>
-<script src="poi/poi-lifecycle.js?v=6"></script>
+<script src="poi/poi-lifecycle.js?v=7"></script>
 <script src="poi/stream.js?v=1"></script>
-<script src="poi/poi-render.js?v=67"></script>
+<script src="poi/poi-render.js?v=68"></script>
 <script src="poi/poi-feature.js?v=40"></script>
 <script src="poi/liq-flux.js?v=29"></script>
 <script src="poi/whale-sonar.js?v=28"></script>
-<script src="poi/confluence.js?v=26"></script>
+<script src="poi/confluence.js?v=27"></script>
 </body>
 </html>

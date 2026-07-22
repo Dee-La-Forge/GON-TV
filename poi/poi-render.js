@@ -271,7 +271,9 @@
       // (scroll-back a venir) restait figee fausse jusqu'au changement de TF.
       let cacheable = false;
       try {
-        if (paintData === undefined) paintData = gon.series.data() || null;   // 1 copie max par frame
+        // Revue : dataNow (référence, zéro copie) si l'hôte l'expose ; repli
+        // series.data() (copie complète) pour un G-Bot antérieur.
+        if (paintData === undefined) paintData = (typeof gon.dataNow === "function" ? gon.dataNow() : gon.series.data()) || null;
         const A = paintData;
         if (A && A.length) {
           const w0 = Math.floor(ms / 900000) * 900;   // debut de la fenetre M15 (s)

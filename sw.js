@@ -20,7 +20,13 @@
 const CACHE = "gon-shell-" + self.registration.scope.replace(/\W/g, "") + "-v1";
 
 self.addEventListener("install", () => self.skipWaiting());
-self.addEventListener("activate", (e) => e.waitUntil(self.clients.claim()));
+self.addEventListener("activate", (e) => e.waitUntil((async () => {
+  // Revue : purge du cache orphelin pre-audit (nom fixe partage entre les deux
+  // apps, expose ~26 min) — no-op s'il n'existe pas, sans risque depuis que
+  // G-Bot ET GON-TV tournent sur le nom derive du scope.
+  try { await caches.delete("gon-shell-v1"); } catch (_) {}
+  await self.clients.claim();
+})()));
 
 self.addEventListener("fetch", (e) => {
   const req = e.request;
@@ -42,9 +48,16 @@ self.addEventListener("fetch", (e) => {
         return net;
       }
       if (net.ok) {
-        // 1 entree par chemin : purge des anciennes variantes ?v=NN puis put.
-        try { await cache.delete(req, { ignoreSearch: true }); } catch (_) {}
-        cache.put(req, net.clone()).catch(() => {});   // copie fraiche en reserve
+        // 1 entree par chemin : purge des anciennes variantes ?v=NN puis put,
+        // en UNITE sous waitUntil (revue) — le delete awaite seul etait durable
+        // mais le put fire-and-forget pouvait etre perdu (SW termine, quota) :
+        // copie de secours detruite sans remplacante, trou dans le bouclier.
+        // Bonus : plus rien n'est awaite AVANT la livraison de la reponse.
+        const copy = net.clone();   // synchrone, AVANT le return (body non consomme)
+        e.waitUntil((async () => {
+          try { await cache.delete(req, { ignoreSearch: true }); } catch (_) {}
+          try { await cache.put(req, copy); } catch (_) {}
+        })());
       }
       return net;
     } catch (err) {

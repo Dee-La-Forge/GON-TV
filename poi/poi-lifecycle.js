@@ -74,7 +74,9 @@
       firstTouchTs: poi.firstTouchTs ?? (touched ? candleTs : null),
       touchCount: poi.touchCount + (newTouchCandle ? 1 : 0),
       maxPenetrationPct: Math.max(poi.maxPenetrationPct || 0, penetration),
-      lastTouchCandleTs: touched ? candleTs : poi.lastTouchCandleTs,
+      // Math.max (revue) : un rejeu de bougie ANTERIEURE ne doit jamais faire
+      // REGRESSER le pointeur — sinon la garde >= est battue au tour suivant.
+      lastTouchCandleTs: touched ? Math.max(poi.lastTouchCandleTs || 0, candleTs) : poi.lastTouchCandleTs,
       lastLifecycleCandleTs: candleTs,
       statusChangedTs: status !== poi.status ? candleTs : poi.statusChangedTs
     }));
@@ -114,7 +116,7 @@
       firstTouchTs: poi.firstTouchTs ?? timestamp,
       touchCount: poi.touchCount + (newTouchCandle ? 1 : 0),
       maxPenetrationPct: Math.max(poi.maxPenetrationPct || 0, penetration),
-      lastTouchCandleTs: candleTs,
+      lastTouchCandleTs: Math.max(poi.lastTouchCandleTs || 0, candleTs),   // monotone (revue) : jamais de regression du pointeur
       // Le gate d'idempotence n'avance que jusqu'a la derniere bougie CLOSE :
       // la bougie courante n'est pas terminee, et un rattrapage (re-seed) doit
       // pouvoir rejouer une bougie anterieure re-ajoutee a l'historique.
