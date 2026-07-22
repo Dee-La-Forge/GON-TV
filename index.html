@@ -426,15 +426,20 @@ function beep() {   // deux notes brèves, façon carillon
   });
 }
 let alertPrev = null, alertFlashUntil = 0, hasAlerts = false;   // dernier prix vu (croisement) ; fenêtre de flash
-function checkAlerts(price) {
+/* R1 (audit 6) : lo/hi = TERRITOIRE de prix couvert depuis le dernier tick.
+   En WS chaque trade passe ici (les mèches sonnaient déjà) ; en POLLING seul
+   le close 2 s était testé → une mèche entre deux ticks ne sonnait pas. On
+   teste désormais le range nouvellement atteint — même sémantique que le
+   trade-par-trade, quel que soit le transport. */
+function checkAlerts(price, lo = price, hi = price) {
   // NE tire PAS pendant un rattrapage en masse (fillGap/fillGapSec rejouent des prix HISTORIQUES → alertes rétroactives)
   if (!hasAlerts || gapFilling) { alertPrev = null; return; }
-  if (alertPrev != null && price !== alertPrev) {
+  if (alertPrev != null && (price !== alertPrev || hi > alertPrev || lo < alertPrev)) {
     const now = Date.now();
     for (const d of drawings) {
       if (d.type !== 'alert') continue;
       const lvl = d.price;
-      const crossed = (alertPrev < lvl && price >= lvl) || (alertPrev > lvl && price <= lvl);
+      const crossed = (alertPrev < lvl && hi >= lvl) || (alertPrev > lvl && lo <= lvl);
       if (crossed && now - (d.firedAt || 0) > 3000) {   // anti-spam : 3 s entre deux déclenchements
         d.firedAt = now;
         alertFlashUntil = now + 1500;   // le rAF redessine pendant tout le flash
@@ -894,11 +899,23 @@ addEventListener('pagehide', () => {   // flush des écritures débouncées : F5
   lsSet('orion-theme', JSON.stringify(theme));
   if (!replay) persistBars();   // bougies du contexte courant sur disque → rechargement instantané
 });
+let alertBarT = null, alertSeenHi = null, alertSeenLo = null;   // extrêmes DÉJÀ VUS du bar de tête (anti-rétroactif R1)
 function refreshTop() {
   const c = candles[candles.length - 1];
   if (!c) return;
   lastPriceTxt = fmt(c.close);   // appliqué au DOM dans le rAF (chemin chaud : 1 écriture/trade sinon)
-  if (!replay) checkAlerts(c.close);   // franchissement d'alerte (jamais en replay)
+  if (!replay) {
+    // R1 : ne passer à checkAlerts que le territoire NOUVELLEMENT atteint —
+    // poser une alerte en milieu de bougie ne rejoue jamais le déjà-parcouru.
+    let lo = c.close, hi = c.close;
+    if (c.time !== alertBarT) { alertBarT = c.time; lo = c.low; hi = c.high; }   // bar neuf : tout son range est nouveau
+    else {
+      if (alertSeenHi != null && c.high > alertSeenHi) hi = c.high;
+      if (alertSeenLo != null && c.low < alertSeenLo) lo = c.low;
+    }
+    alertSeenHi = c.high; alertSeenLo = c.low;
+    checkAlerts(c.close, lo, hi);   // franchissement d'alerte (jamais en replay)
+  }
   if (hoverT == null) legend(c);
   else if (hoverT === c.time) legend(c, c.volume);   // survol de la bougie LIVE : elle vit, champ V compris
 }
