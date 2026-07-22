@@ -22,6 +22,8 @@
   const LONG = "long", SHORT = "short";
   const COLOR = { long: [255, 45, 94], short: [47, 139, 255] };
   const rgba = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
+  // Teinte vers le blanc (coeur lumineux) — melange arithmetique, pas un degrade.
+  const tint = (c, f) => [Math.round(c[0] + (255 - c[0]) * f), Math.round(c[1] + (255 - c[1]) * f), Math.round(c[2] + (255 - c[2]) * f)];
 
   let gon = null, S = null;
   let events = [], orbs = [], pings = [], waves = [];
@@ -58,6 +60,7 @@
         const w = fluxW || 130, h = fluxH || 300;
         const x = 12 + Math.random() * Math.max(20, w - 24);
         orbs.push({ side, r, x, y: side === LONG ? -r : h + r, ph: Math.random() * 6.28,
+          amp: 2.5 + Math.random() * 3,   // derive propre a chaque orbe (moins mecanique)
           v: (0.8 + Math.random() * 1.3) * (side === LONG ? 1 : -1) });
         // r porte dans le ping -> l'anneau de choc grandit avec la liquidation
         // (petit = discret, gros = onde de choc d'impact).
@@ -154,37 +157,61 @@
       for (let i = pings.length - 1; i >= 0; i--) {
         const p = pings[i], age = (now - p.born) / 700;
         if (age >= 1) { pings.splice(i, 1); continue; }
-        // Anneau de choc : rayon final et epaisseur croissent avec r -> petit
-        // orbe = cercle discret, grosse liquidation = onde de choc d'impact.
-        const rr = p.r || 6;
-        fluxCx.strokeStyle = rgba(COLOR[p.side], Math.min(0.95, 0.5 + rr * 0.013) * (1 - age));
+        // Anneau de choc : expansion en ease-out (rapide puis freine) + echo
+        // interieur discret. Rayon final et epaisseur croissent avec r.
+        const rr = p.r || 6, ease = 1 - (1 - age) * (1 - age);
+        const a0 = Math.min(0.95, 0.5 + rr * 0.013) * (1 - age);
+        fluxCx.strokeStyle = rgba(COLOR[p.side], a0);
         fluxCx.lineWidth = 1 + rr * 0.05;
-        fluxCx.beginPath(); fluxCx.arc(p.x, p.y, 3 + age * (14 + rr * 2.2), 0, Math.PI * 2); fluxCx.stroke();
+        fluxCx.beginPath(); fluxCx.arc(p.x, p.y, 3 + ease * (14 + rr * 2.2), 0, Math.PI * 2); fluxCx.stroke();
+        fluxCx.strokeStyle = rgba(COLOR[p.side], a0 * 0.45);
+        fluxCx.lineWidth = 0.75;
+        fluxCx.beginPath(); fluxCx.arc(p.x, p.y, 2 + ease * (8 + rr * 1.1), 0, Math.PI * 2); fluxCx.stroke();
       }
       for (let i = orbs.length - 1; i >= 0; i--) {
         const o = orbs[i]; o.y += o.v; o.ph += 0.045;
-        const x = o.x + Math.sin(o.ph) * 4;
+        const x = o.x + Math.sin(o.ph) * (o.amp || 4);
         if ((o.side === LONG && o.y - o.r > fluxH) || (o.side === SHORT && o.y + o.r < 0)) { orbs.splice(i, 1); continue; }
         const c = COLOR[o.side];
         fluxCx.save();
+        // Fusion ADDITIVE : les passes s'illuminent au lieu de s'empiler en
+        // disques opaques — rendu plasma, chevauchements lumineux, zero bord dur.
+        fluxCx.globalCompositeOperation = "lighter";
         if (o.dim) {
-          // boule d'ambiance (autre symbole) : petite mais plus lumineuse, glow
-          // renforce pour rester lisible a l'ecran (sans coeur blanc, elle reste
-          // subordonnee aux liquidations du symbole courant).
-          fluxCx.shadowColor = rgba(c, 0.85); fluxCx.shadowBlur = 9;
-          fluxCx.fillStyle = rgba(c, 0.65);
+          // boule d'ambiance (autre symbole) : petit plasma doux, sans coeur ni
+          // queue — subordonnee aux liquidations du symbole courant.
+          fluxCx.shadowColor = rgba(c, 0.9); fluxCx.shadowBlur = 8 + o.r;
+          fluxCx.fillStyle = rgba(c, 0.30);
           fluxCx.beginPath(); fluxCx.arc(x, o.y, o.r, 0, Math.PI * 2); fluxCx.fill();
+          fluxCx.shadowBlur = 4;
+          fluxCx.fillStyle = rgba(tint(c, 0.25), 0.45);
+          fluxCx.beginPath(); fluxCx.arc(x, o.y, o.r * 0.55, 0, Math.PI * 2); fluxCx.fill();
         } else {
-          // Queue de comete : longueur croissante avec r (grosse liq = trainee
-          // plus longue), orientee par le sens de la vitesse (o.v signe).
-          fluxCx.strokeStyle = rgba(c, 0.5); fluxCx.lineWidth = Math.max(1.5, o.r * 0.95);
-          fluxCx.beginPath(); fluxCx.moveTo(x, o.y - o.v * (16 + o.r * 1.2)); fluxCx.lineTo(x, o.y); fluxCx.stroke();
-          // Glow proportionnel a r : petit orbe = halo sobre, gros = embrasement.
-          fluxCx.shadowColor = rgba(c, 1); fluxCx.shadowBlur = 10 + o.r * 1.2;
-          fluxCx.fillStyle = rgba(c, 0.95);
+          // QUEUE EFFILEE : segments a largeur et alpha degressifs (vraie comete,
+          // fini le gros trait uniforme). Longueur croissante avec r.
+          const tailLen = o.v * (16 + o.r * 1.2);
+          fluxCx.lineCap = "round";
+          for (let s = 4; s >= 0; s--) {
+            const f0 = s / 5, f1 = (s + 1) / 5, fade = (1 - f0) * (1 - f0);
+            fluxCx.strokeStyle = rgba(c, 0.40 * fade);
+            fluxCx.lineWidth = Math.max(0.8, o.r * 0.72 * (1 - f0));
+            fluxCx.beginPath();
+            fluxCx.moveTo(x, o.y - tailLen * f1); fluxCx.lineTo(x, o.y - tailLen * f0);
+            fluxCx.stroke();
+          }
+          // CORPS en trois passes : halo large tres doux -> disque colore ->
+          // coeur teinte blanc + point speculaire. Le tout en additif.
+          fluxCx.shadowColor = rgba(c, 1); fluxCx.shadowBlur = 14 + o.r * 1.4;
+          fluxCx.fillStyle = rgba(c, 0.34);
           fluxCx.beginPath(); fluxCx.arc(x, o.y, o.r, 0, Math.PI * 2); fluxCx.fill();
-          fluxCx.shadowBlur = 0; fluxCx.fillStyle = "rgba(255,255,255,.97)";
-          fluxCx.beginPath(); fluxCx.arc(x, o.y - o.r * 0.2, Math.max(1, o.r * 0.36), 0, Math.PI * 2); fluxCx.fill();
+          fluxCx.shadowBlur = 8;
+          fluxCx.fillStyle = rgba(c, 0.55);
+          fluxCx.beginPath(); fluxCx.arc(x, o.y, o.r * 0.72, 0, Math.PI * 2); fluxCx.fill();
+          fluxCx.shadowBlur = 5;
+          fluxCx.fillStyle = rgba(tint(c, 0.55), 0.85);
+          fluxCx.beginPath(); fluxCx.arc(x, o.y, o.r * 0.42, 0, Math.PI * 2); fluxCx.fill();
+          fluxCx.shadowBlur = 0; fluxCx.fillStyle = "rgba(255,255,255,.85)";
+          fluxCx.beginPath(); fluxCx.arc(x, o.y - o.r * 0.22, Math.max(0.8, o.r * 0.16), 0, Math.PI * 2); fluxCx.fill();
         }
         fluxCx.restore();
       }
