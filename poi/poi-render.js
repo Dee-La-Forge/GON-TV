@@ -271,15 +271,25 @@
           const w0 = Math.floor(ms / 900000) * 900;   // debut de la fenetre M15 (s)
           let lo = 0, hi = A.length - 1;
           while (hi - lo > 1) { const m = (lo + hi) >> 1; if (A[m].time < w0) lo = m; else hi = m; }
-          let bestV = null;
+          let bestV = null, zoneFirst = null, lineFound = false;
+          const e = poi.entry ?? poi.entryPrice;   // la LIGNE visible est au prix d'entree
           for (let i = lo; i < A.length && A[i].time < w0 + 900; i++) {
             const b = A[i];
             if (b.time < w0) continue;
             if (birth) {
               if (poi.direction === "short") { if (bestV == null || b.high > bestV) { bestV = b.high; v = b.time; } }
               else { if (bestV == null || b.low < bestV) { bestV = b.low; v = b.time; } }
-            } else if (b.low <= poi.zoneHigh && b.high >= poi.zoneLow) { v = b.time; break; }
+            } else {
+              // TOUCHE/MORT : priorite a la 1re bougie qui CROISE la ligne
+              // d'entree (l'entree vit a l'INTERIEUR de la zone : une bougie
+              // peut effleurer la zone sans atteindre le trait — tick pose sur
+              // une bougie qui ne touche visiblement rien). Repli : 1re bougie
+              // recouvrant la zone (touche de zone, semantique moteur).
+              if (e != null && b.low <= e && b.high >= e) { v = b.time; lineFound = true; break; }
+              if (zoneFirst == null && b.low <= poi.zoneHigh && b.high >= poi.zoneLow) zoneFirst = b.time;
+            }
           }
+          if (!birth && !lineFound && zoneFirst != null) v = zoneFirst;
         }
       } catch (_) {}
       if (anchorCache.size > 4000) anchorCache.clear();
