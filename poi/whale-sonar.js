@@ -139,9 +139,15 @@
   async function seedThresholds() {
     for (const s of SYMS) {
       if (stats[s].ready) continue;
+      // Horloge 429 partagée (revue) : un ban vu ailleurs = le seed s'arrête
+      // au lieu de l'entretenir (le live echantillonnera).
+      if (gon && gon.apiCool && Date.now() < gon.apiCool.until()) break;
       try {
-        const r = await fetch(`https://fapi.binance.com/fapi/v1/aggTrades?symbol=${s}&limit=1000`);
-        if (r.status === 429 || r.status === 418) break;   // rate-limit : STOP, le live echantillonnera
+        const r = await fetch(`https://fapi.binance.com/fapi/v1/aggTrades?symbol=${s}&limit=1000`, { signal: AbortSignal.timeout(10000) });
+        if (r.status === 429 || r.status === 418) {
+          if (gon && gon.apiCool) gon.apiCool.hit(Number(r.headers.get("retry-after")));   // fait taire les 3 autres
+          break;   // rate-limit : STOP, le live echantillonnera
+        }
         if (r.ok) {
           const st = stats[s];
           for (const t of await r.json()) { const n = +t.p * +t.q; if (n > 0) st.arr.push(n); }

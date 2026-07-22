@@ -73,7 +73,8 @@
     lastKlinesAt = now;                          // avance MEME sur echec : pas de martelage 429
     const sym = curSymbol;
     try {
-      if (Date.now() < fapiCoolUntil) return;   // ban/limite en cours : ne pas l'entretenir (audit)
+      // ban/limite en cours (LOCAL ou PARTAGÉ — revue) : ne pas l'entretenir
+      if (Date.now() < Math.max(fapiCoolUntil, gon.apiCool ? gon.apiCool.until() : 0)) return;
       const [iv] = pickInterval(span);
       const r = await fetch(`https://fapi.binance.com/fapi/v1/klines?symbol=${sym}&interval=${iv}` +
         `&startTime=${from * 1000}&endTime=${to * 1000}&limit=1000`,
@@ -81,6 +82,7 @@
       if (r.status === 429 || r.status === 418) {   // honorer Retry-After : marteler PROLONGE le ban Binance
         const ra = Number(r.headers.get("retry-after")) || 30;
         fapiCoolUntil = Date.now() + ra * 1000;
+        if (gon.apiCool) gon.apiCool.hit(ra);   // horloge partagée (revue) : fait taire chart/POI/whale aussi
         return;
       }
       if (!r.ok) return;

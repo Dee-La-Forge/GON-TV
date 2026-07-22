@@ -58,7 +58,10 @@
     // pas manquer silencieusement a cause d'un hoquet reseau ou serveur.
     let lastErr = null;
     for (let attempt = 0; attempt < 6; attempt++) {
-      const wait = poiApiCoolUntil - Date.now();
+      // Horloge partagée (revue) : un ban vu par le chart/confluence/whale nous
+      // fait attendre AUSSI — on n'entretient plus le ban des autres.
+      const shared = gon && gon.apiCool ? gon.apiCool.until() : 0;
+      const wait = Math.max(poiApiCoolUntil, shared) - Date.now();
       if (wait > 0) await new Promise((r) => setTimeout(r, Math.min(wait, 60000)));
       if (signal && signal.aborted) { const e = Error("aborted"); e.name = "AbortError"; throw e; }
       let response;
@@ -73,6 +76,7 @@
       if (response.status === 429 || response.status === 418) {
         const ra = Number(response.headers.get("retry-after"));
         poiApiCoolUntil = Date.now() + (Number.isFinite(ra) && ra > 0 ? ra * 1000 : 60000) + 1000;
+        if (gon && gon.apiCool) gon.apiCool.hit(Number.isFinite(ra) && ra > 0 ? ra : 60);   // horloge partagée (revue)
         continue;
       }
       if (response.status >= 500) {   // 5xx transitoire : backoff + retry

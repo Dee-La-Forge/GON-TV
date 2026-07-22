@@ -2751,6 +2751,14 @@ window.__gon = {
     get: k => idbOpen.then(() => idbGet('kv', k)),
     put: (k, v) => idbOpen.then(() => idbPut('kv', k, v)),
   },
+  // Horloge 429/418 PARTAGÉE (unification des îlots — revue) : le budget de
+  // poids fapi est PAR IP, commun aux 4 consommateurs (chart, POI, whale,
+  // confluence). Un ban vu par l'un fait taire TOUS les chemins jusqu'à
+  // l'échéance — et alimente le bandeau « Binance en pause ».
+  apiCool: {
+    until: () => apiCoolUntil,
+    hit: ra => { apiCoolUntil = Math.max(apiCoolUntil, Date.now() + ((+ra > 0 ? +ra : 30) * 1000)); },
+  },
   // G-ON : ouverture de bougie de la grille COURANTE (epoch / lundi W0 / mois
   // calendaire). Source UNIQUE du snap des pastilles POI cote rendu — plus de
   // grille reimplementee a resynchroniser (le mensuel calendaire notamment).
@@ -2846,9 +2854,9 @@ if ('serviceWorker' in navigator && location.hostname.endsWith('github.io')) nav
 <script src="poi/poi-lifecycle.js?v=7"></script>
 <script src="poi/stream.js?v=1"></script>
 <script src="poi/poi-render.js?v=68"></script>
-<script src="poi/poi-feature.js?v=42"></script>
+<script src="poi/poi-feature.js?v=43"></script>
 <script src="poi/liq-flux.js?v=29"></script>
-<script src="poi/whale-sonar.js?v=28"></script>
-<script src="poi/confluence.js?v=27"></script>
+<script src="poi/whale-sonar.js?v=29"></script>
+<script src="poi/confluence.js?v=28"></script>
 </body>
 </html>
