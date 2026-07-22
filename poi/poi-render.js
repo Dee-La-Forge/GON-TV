@@ -152,7 +152,7 @@
       // cull sur l'ancre SNAPPEE (celle qui est dessinee) : le createdTs brut
       // peut etre jusqu'a un bucket a droite de l'ancre sur les TF hauts —
       // culler dessus fait disparaitre des niveaux visibles au bord droit.
-      const startSec = anchorSec(poi, poi.createdTs);
+      const startSec = anchorSec(poi, poi.createdTs, true);
       const active = poi.status === "ACTIVE_UNTOUCHED";
       // Fallback aligne sur drawLevel (endMs ?? now) : un POI mort sans champ
       // de touche est DESSINE jusqu'a maintenant — le culler a createdTs le
@@ -248,14 +248,19 @@
     // attend (97% mesure). Repli : snap M15 classique (fenetre hors donnees).
     // Memoise par POI+instant (les bougies passees ne changent pas) ; le cache
     // saute au changement de symbole/TF.
+    // birth=true : bougie qui FORME le niveau = l'extreme de la fenetre M15
+    // (max high pour un short — zone au sommet ; min low pour un long) ; une
+    // bougie "en chemin" peut recouvrir la zone avant celle de l'extreme, la
+    // premiere-qui-touche est donc fausse pour une NAISSANCE.
+    // birth=false (touche/mort) : premiere bougie dont la plage recouvre la zone.
     let anchorCache = new Map(), anchorKey = "", paintData;
-    function anchorSec(poi, ms) {
+    function anchorSec(poi, ms, birth) {
       const snapped = snapToBarSec(ms);
       const s = Number(gon.tfSec) || 0;
       if (s <= 0 || s >= 900) return snapped;   // TF >= M15 : bougie contenante deja exacte
       const ck = (gon.symbol || "") + "|" + (gon.tf || "");
       if (ck !== anchorKey) { anchorCache.clear(); anchorKey = ck; }
-      const key = (poi.id || "") + "|" + ms;
+      const key = (poi.id || "") + "|" + ms + (birth ? "|b" : "");
       let v = anchorCache.get(key);
       if (v !== undefined) return v;
       v = snapped;
@@ -266,10 +271,14 @@
           const w0 = Math.floor(ms / 900000) * 900;   // debut de la fenetre M15 (s)
           let lo = 0, hi = A.length - 1;
           while (hi - lo > 1) { const m = (lo + hi) >> 1; if (A[m].time < w0) lo = m; else hi = m; }
+          let bestV = null;
           for (let i = lo; i < A.length && A[i].time < w0 + 900; i++) {
             const b = A[i];
             if (b.time < w0) continue;
-            if (b.low <= poi.zoneHigh && b.high >= poi.zoneLow) { v = b.time; break; }
+            if (birth) {
+              if (poi.direction === "short") { if (bestV == null || b.high > bestV) { bestV = b.high; v = b.time; } }
+              else { if (bestV == null || b.low < bestV) { bestV = b.low; v = b.time; } }
+            } else if (b.low <= poi.zoneHigh && b.high >= poi.zoneLow) { v = b.time; break; }
           }
         }
       } catch (_) {}
@@ -291,8 +300,8 @@
       // fin-de-gap posaient l'origine APRES la naissance — jusqu'a DANS LE FUTUR
       // pour un niveau recent — et la pastille flottait dans le vide.)
       const originMs = poi.createdTs;
-      let x1 = gon.timeToX(anchorSec(poi, originMs));
-      if (x1 == null || !isFinite(x1)) x1 = gon.timeToX(anchorSec(poi, poi.availableAt));
+      let x1 = gon.timeToX(anchorSec(poi, originMs, true));
+      if (x1 == null || !isFinite(x1)) x1 = gon.timeToX(anchorSec(poi, poi.availableAt, true));
       if (x1 == null || !isFinite(x1)) return null;
 
       const endMs = active ? now : (poi.firstTouchTs ?? poi.statusChangedTs ?? now);
@@ -506,7 +515,7 @@
       const hue = PROV_HUE[p.direction] || PROV_HUE.long;
       const entry = p.entry ?? p.entryPrice;
       const y = entry == null ? null : gon.priceToY(entry);
-      let x1 = gon.timeToX(anchorSec(p, p.createdTs));
+      let x1 = gon.timeToX(anchorSec(p, p.createdTs, true));
       if (y == null || !isFinite(y) || x1 == null || !isFinite(x1)) return;
       // Hors echelle de prix : ne rien dessiner (sinon le chip, clampe dans
       // le pane, flotterait au bord sans ligne associee — niveau fantome).
