@@ -909,6 +909,11 @@ function fillGapSecSoon() {   // throttle PROPRE aux secondes (ne pas partager a
 async function deepenSec(seq) {   // garde seq : une boucle périmée (TF/symbole changé) se rompt sans muter
   const target = 500 * tfDef().sec;   // ~500 seaux visés
   for (let g = 0; g < 8; g++) {
+    // Espacement anti-rafale (revue débit) : 8 tours × 2 pages à POIDS 20 dos à
+    // dos = 320 de poids instantanés → 429 quasi garanti sur IP partagée. La
+    // profondeur est une tâche de FOND : 250 ms entre tours étalent la même
+    // charge sans aucun coût visuel (l'affichage est déjà là).
+    if (g > 0) await new Promise(r => setTimeout(r, 250));
     // loadingOld = VERROU de prepend partagé avec le scroll-back : jamais deux prepends concurrents
     if (seq !== loadSeq || replay || loadingOld || !firstTradeId || firstTradeId <= 1) break;
     if (candles[candles.length - 1].time - candles[0].time >= target) break;
