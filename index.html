@@ -676,13 +676,19 @@ async function idbPruneBars(curKey) {   // LRU IDB_CTX_MAX + âge 14 j, index l�
   const clean = {}; for (const k of live) clean[k] = idx[k];
   idbPut('kv', 'bars.idx', clean);
 }
-async function loadPersistedDeep() {   // IDB (profond) vs localStorage (dernière chance pagehide) : le plus FRAIS gagne
+async function loadPersistedDeep() {   // IDB (PROFONDEUR) ⊕ localStorage (FRAÎCHEUR du pagehide) : fusion des deux
   await idbOpen;
   const ls = loadPersisted();
   if (!idb) return ls;
   const o = await idbGet('bars', symbol + '|' + tf);
-  if (validPersisted(o) && (!ls || o.t >= ls.t)) return o;
-  return ls;
+  if (!validPersisted(o)) return ls;
+  if (!ls || o.t >= ls.t) return o;   // IDB à la fois profond ET plus frais
+  // localStorage plus frais (écrit au pagehide) mais tronqué à BARS_CAP : on
+  // greffe sa queue fraîche sur la profondeur IDB — sinon « le plus frais
+  // gagne » jetait 18 000 bougies d'historique à chaque rechargement.
+  const cut = ls.b[0].time;
+  const b = o.b.filter(c => c.time < cut).concat(ls.b);   // strictement croissant : préfixe < cut, puis ls croissant
+  return { v: o.v, t: ls.t, atStart: o.atStart, fi: o.fi, lm: ls.lm, la: ls.la, b };
 }
 let dataCtx = '';   // contexte des candles chargées ; ≠ symbol|tf courant pendant un backoff = données périmées
 const ctxFresh = () => dataCtx === symbol + '|' + tf;
