@@ -619,6 +619,7 @@ let replay = null;
 let curtainX = null;
 let oldestDone = false, loadingOld = false;
 let clockOff = 0;   // décalage horloge locale ↔ heure serveur Binance (ms)
+let clockSynced = false;   // revue : le juge d'âge R2 est GELÉ tant qu'aucune sync n'a réussi (horloge machine non fiable)
 let tool = 'cursor', magnet = false, showDraw = true;
 
 /* ---------- chart ---------- */
@@ -1162,7 +1163,7 @@ function startPoll(seq) {
   if (pollTimer || seq !== loadSeq) return;
   if (!replay) $('dot').classList.add('live');   // pas de « live » sur du passé
   const syncClock = () => fetchJson('https://fapi.binance.com/fapi/v1/time', 5000)
-    .then(j => { if (j.serverTime) clockOff = j.serverTime - Date.now(); }).catch(() => {});
+    .then(j => { if (j.serverTime) { clockOff = j.serverTime - Date.now(); clockSynced = true; } }).catch(() => {});
   syncClock();
   let backoff = 0, ticks = 0, inFlight = false, fails = 0;
   const failed = () => { if (++fails >= 3 && seq === loadSeq) $('dot').classList.remove('live'); };
@@ -1179,7 +1180,7 @@ function startPoll(seq) {
     if (seq !== loadSeq || inFlight) return;             // sérialise : pas de réponses hors ordre
     if (replay || !candles.length) return;
     if (backoff > 0) { backoff--; return; }              // recul après erreur (429, réseau…)
-    if (++ticks % 30 === 0) syncClock();                 // resynchronise l'horloge toutes les ~60 s
+    if (!clockSynced || ++ticks % 30 === 0) syncClock();   // resync ~60 s — et CHAQUE tick tant que la 1re n'a pas réussi (revue)
     if (isSecTf() && (gapFilling || !lastAggId)) return;   // fillGapSec en cours OU curseur non amorcé (retour cache) : le rattrapage s'en charge
     inFlight = true;
     try {
@@ -1198,7 +1199,10 @@ function startPoll(seq) {
           // en <1000 trades — le seuil par taille de page classait ce lot "live"
           // et rejouait des alertes d'il y a une heure. Le juge de paix est
           // l'ÂGE du dernier trade : vieux de >15 s = rattrapage, alertes muettes.
-          const stale = Date.now() + clockOff - k[k.length - 1].T > 15000;
+          // clockSynced (revue) : horloge machine seule = juge non fiable (>15 s
+          // d'écart inverserait live/rattrapage) — tant que la 1re sync n'a pas
+          // réussi, on classe « live » (comportement pré-R2, borné à ~1 tick).
+          const stale = clockSynced && Date.now() + clockOff - k[k.length - 1].T > 15000;
           if (stale) { gapFilling = true; try { applyTrades(k); } finally { gapFilling = false; } }
           else applyTrades(k);   // lot court ET frais = LIVE : les alertes tirent normalement
         }
@@ -1259,7 +1263,7 @@ function startWs(attempt = 0) {
     try {
       gotMsg = true; lastMsgAt = Date.now();
       const { stream, data: d } = JSON.parse(e.data);
-      if (d.E) clockOff = d.E - Date.now();          // resynchronise l'horloge sur Binance
+      if (d.E) { clockOff = d.E - Date.now(); clockSynced = true; }   // resynchronise l'horloge sur Binance
       if (replay || !candles.length) return;
       if (stream.endsWith('aggTrade')) {
         const p = +d.p, tt = d.T / 1000, last = candles[candles.length - 1];
@@ -1564,30 +1568,31 @@ function resetTransient() { temp = null; measure = null; select(null); }
 function clearDrawings() { drawings = []; resetTransient(); saveDrawings(); }
 
 /* --- ancrage TEMPS ABSOLU : les tracés survivent au changement de TF --- */
-/* R3 (audit 6) : sur les TF MENSUELS la grille est calendaire (28-31 j) mais
-   l'extrapolation hors données utilisait un pas FIXE de 30 j → une ancre posée
-   dans la marge glissait (~3 %/mois d'écart) quand les vraies bougies
-   naissaient. Marche en barres calendaires via bucketStart/barEnd (bornée). */
-const MONTHLY_WALK_CAP = 4800;   // ~400 ans en 1M : au-delà, repli linéaire (dégénéré)
+/* R3 (audit 6, O(1) en revue) : sur les TF MENSUELS la grille est calendaire
+   (28-31 j) — l'extrapolation hors données se fait en ARITHMÉTIQUE DE MOIS
+   pure (la grille = floor((y*12+m)/fact)*fact, cf. bucketStart) : nombre de
+   barres entre deux opens alignés = Δmois/fact, n-ième barre = Date.UTC
+   directement. Zéro boucle, zéro cap, zéro repli — exact à toute distance.
+   INVARIANT : les opens de `candles` sont alignés sur la grille fact (pipeline
+   rollup/bucketStart) — c'est ce qui rend l'arithmétique exacte. */
+const mIdx = t => { const d = new Date(t * 1000); return d.getUTCFullYear() * 12 + d.getUTCMonth(); };
+const mOpen = m => Date.UTC(1970, m - 23640, 1) / 1000;   // 23640 = 1970*12 ; Date.UTC normalise tout index de mois
 function lOf(t) {            // temps unix → index logique (extrapole hors données)
   const a = dataNow();
   if (!a.length || t == null) return null;
   const d = tfDef(), sec = d.sec;
   if (t <= a[0].time) {
     if (d.src === '1M') {
-      const open = bucketStart(t), end = barEnd(open);
-      const f = (t - open) / (end - open || 1);
-      let n = 0, b = end;
-      while (b <= a[0].time && n < MONTHLY_WALK_CAP) { n++; b = barEnd(b); }
-      if (n < MONTHLY_WALK_CAP) return f - n;   // n barres calendaires avant a[0], + fraction dans la sienne
+      const open = bucketStart(t);
+      return (t - open) / (barEnd(open) - open || 1) - (mIdx(a[0].time) - mIdx(open)) / (d.fact || 1);
     }
     return (t - a[0].time) / sec;
   }
   if (t >= a[a.length - 1].time) {
     if (d.src === '1M') {
-      let n = 0, cur = a[a.length - 1].time;
-      while (barEnd(cur) <= t && n < MONTHLY_WALK_CAP) { cur = barEnd(cur); n++; }
-      if (n < MONTHLY_WALK_CAP) return a.length - 1 + n + (t - cur) / (barEnd(cur) - cur || 1);
+      const open = bucketStart(t);
+      return a.length - 1 + (mIdx(open) - mIdx(a[a.length - 1].time)) / (d.fact || 1)
+        + (t - open) / (barEnd(open) - open || 1);
     }
     return a.length - 1 + (t - a[a.length - 1].time) / sec;
   }
@@ -1603,22 +1608,16 @@ function tOf(l) {            // index logique → temps unix
   if (i < 0) {
     if (d.src === '1M') {
       const k = Math.ceil(-l), f = l + k;   // k barres avant a[0], fraction f dans la barre
-      if (k < MONTHLY_WALK_CAP) {
-        let open = a[0].time;
-        for (let j = 0; j < k; j++) open = bucketStart(open - 1);
-        return open + f * (barEnd(open) - open);
-      }
+      const open = mOpen(mIdx(a[0].time) - k * (d.fact || 1));
+      return open + f * (barEnd(open) - open);
     }
     return a[0].time + l * sec;
   }
   if (i >= a.length - 1) {
     if (d.src === '1M') {
       const steps = Math.floor(l - (a.length - 1)), f = l - (a.length - 1) - steps;
-      if (steps < MONTHLY_WALK_CAP) {
-        let open = a[a.length - 1].time;
-        for (let j = 0; j < steps; j++) open = barEnd(open);
-        return open + f * (barEnd(open) - open);
-      }
+      const open = mOpen(mIdx(a[a.length - 1].time) + steps * (d.fact || 1));
+      return open + f * (barEnd(open) - open);
     }
     return a[a.length - 1].time + (l - (a.length - 1)) * sec;
   }
@@ -2763,7 +2762,7 @@ if ('serviceWorker' in navigator && location.hostname.endsWith('github.io')) nav
 <script src="poi/poi-lifecycle.js?v=7"></script>
 <script src="poi/stream.js?v=1"></script>
 <script src="poi/poi-render.js?v=68"></script>
-<script src="poi/poi-feature.js?v=40"></script>
+<script src="poi/poi-feature.js?v=41"></script>
 <script src="poi/liq-flux.js?v=29"></script>
 <script src="poi/whale-sonar.js?v=28"></script>
 <script src="poi/confluence.js?v=27"></script>

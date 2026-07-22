@@ -854,6 +854,7 @@
     applySlider();
 
     let currentSymbol = gon.symbol;
+    let poiWallTick = 0;   // tick horloge du rendu (revue) : 1 repaint/min pour les predicats temporels
     startPoiStream(currentSymbol);
     setInterval(() => {
       // Jamais de flush pendant la recovery : flush(Date.now()) finaliserait
@@ -883,8 +884,10 @@
       // Audit 2026-07-22 : le repaint inconditionnel forcait un paint COMPLET
       // (~10k POI filtres + tris + lasers) chaque seconde meme a vue figee.
       // Les mutations reelles marquent deja le rendu (setPois/setProvisional) ;
-      // on ne garde qu'une ceinture sur les buckets clos.
-      if (closed.length) render.repaint();
+      // ceinture sur les buckets clos + UN tick HORLOGE par minute (revue) :
+      // les predicats temporels du rendu (recentDead 24 h, cull endSec=now)
+      // n'etaient sinon reevalues qu'a la prochaine mutation (~15 min).
+      if (closed.length || ++poiWallTick % 60 === 0) render.repaint();
       if (gon.symbol && gon.symbol !== currentSymbol) { currentSymbol = gon.symbol; startPoiStream(currentSymbol); }
       updateDiag();
     }, 1000);
