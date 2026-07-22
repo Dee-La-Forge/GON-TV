@@ -27,6 +27,16 @@
   let events = [], orbs = [], pings = [], waves = [];
   let panel, waveCv, waveCx, fluxCv, fluxCx, numEls, domEls, evList, symEl, btn;
   let visible = true, curSymbol = "", rafId = 0;
+  // Dimensions CSS (px logiques) du canal et de l'onde : le bitmap est mis a
+  // l'echelle DPR (net en retina), le dessin/la logique restent en px CSS.
+  let fluxW = 0, fluxH = 0, waveW = 0;
+  let isLight = false;   // thème clair (luminance du fond > 0.5) — tons neutres du panneau
+
+  // Luminance relative approx d'un hex #rrggbb (0 sombre → 1 clair).
+  function lumHex(hex) {
+    const n = parseInt(String(hex || "#060604").slice(1), 16);
+    return (0.2126 * (n >> 16 & 255) + 0.7152 * (n >> 8 & 255) + 0.0722 * (n & 255)) / 255;
+  }
   let ws = null, attempt = 0, lastMsgAt = 0, reconnectTimer = 0, fluxFrame = 0;
 
   /* ---------- donnees ---------- */
@@ -40,13 +50,18 @@
     // Visuels UNIQUEMENT quand le panneau est affiche : masque, rien ne les
     // purge (rAF suspendu) et waves croissait sans borne toute la nuit.
     if (panelShown()) {
-      const r = Math.min(20, Math.max(6, (Math.log10(usd) - 4.1) * 5.6));
+      // Rampe log ACCENTUEE : petites liq discretes (~5-8 px), grosses
+      // spectaculaires (jusqu'a ~34 px). Pente forte -> hierarchie nette sans
+      // seuil discret (choix utilisateur : continu accentue).
+      const r = Math.min(34, Math.max(5, (Math.log10(usd) - 4.1) * 8));
       if (orbs.length < 140) {
-        const w = fluxCv.width || 130, h = fluxCv.height || 300;
+        const w = fluxW || 130, h = fluxH || 300;
         const x = 12 + Math.random() * Math.max(20, w - 24);
         orbs.push({ side, r, x, y: side === LONG ? -r : h + r, ph: Math.random() * 6.28,
           v: (0.8 + Math.random() * 1.3) * (side === LONG ? 1 : -1) });
-        pings.push({ side, x, y: side === LONG ? 8 : h - 8, born: performance.now() });
+        // r porte dans le ping -> l'anneau de choc grandit avec la liquidation
+        // (petit = discret, gros = onde de choc d'impact).
+        pings.push({ side, x, y: side === LONG ? 8 : h - 8, born: performance.now(), r });
       }
       waves.push({ side, x: -60, v: 9 + Math.log10(usd), w: 30 + (Math.log10(usd) - 4) * 34 });
       if (waves.length > 80) waves.splice(0, waves.length - 80);   // borne dure
@@ -115,32 +130,41 @@
   function fluxLoop() {
     if (panelShown()) {
       // resync bitmap sur LES DEUX dimensions (largeur seule = animation
-      // etiree quand la hauteur du cadre change) ; jamais sur un cadre 0
+      // etiree quand la hauteur du cadre change) ; jamais sur un cadre 0.
+      // Bitmap a l'echelle DPR (net en retina), dessin/logique en px CSS.
+      const dpr = window.devicePixelRatio || 1;
       const host = fluxCv.parentElement.getBoundingClientRect();
       const cw = Math.round(host.width), ch = Math.round(host.height);
-      if (cw > 0 && ch > 0 && (fluxCv.width !== cw || fluxCv.height !== ch)) {
-        fluxCv.width = cw; fluxCv.height = ch;
+      if (cw > 0 && ch > 0) {
+        fluxW = cw; fluxH = ch;
+        const bw = Math.round(cw * dpr), bh = Math.round(ch * dpr);
+        if (fluxCv.width !== bw || fluxCv.height !== bh) { fluxCv.width = bw; fluxCv.height = bh; }
       }
+      fluxCx.setTransform(dpr, 0, 0, dpr, 0, 0);   // repere en px CSS
       // remanence phosphore SANS assombrir : fondu vers la transparence
       // (destination-out) — le canal garde le fond du panneau, pas de bloc
       // sombre encadre. Purge dure periodique : l'arrondi 8 bits fait stagner
       // les alphas 1-2/255 (voile fantome permanent sur les trajets frequents).
-      if ((fluxFrame++ & 1023) === 0) fluxCx.clearRect(0, 0, fluxCv.width, fluxCv.height);
+      if ((fluxFrame++ & 1023) === 0) fluxCx.clearRect(0, 0, fluxW, fluxH);
       fluxCx.globalCompositeOperation = "destination-out";
       fluxCx.fillStyle = "rgba(0,0,0,.18)";
-      fluxCx.fillRect(0, 0, fluxCv.width, fluxCv.height);
+      fluxCx.fillRect(0, 0, fluxW, fluxH);
       fluxCx.globalCompositeOperation = "source-over";
       const now = performance.now();
       for (let i = pings.length - 1; i >= 0; i--) {
         const p = pings[i], age = (now - p.born) / 700;
         if (age >= 1) { pings.splice(i, 1); continue; }
-        fluxCx.strokeStyle = rgba(COLOR[p.side], 0.7 * (1 - age)); fluxCx.lineWidth = 1;
-        fluxCx.beginPath(); fluxCx.arc(p.x, p.y, 3 + age * 16, 0, Math.PI * 2); fluxCx.stroke();
+        // Anneau de choc : rayon final et epaisseur croissent avec r -> petit
+        // orbe = cercle discret, grosse liquidation = onde de choc d'impact.
+        const rr = p.r || 6;
+        fluxCx.strokeStyle = rgba(COLOR[p.side], Math.min(0.95, 0.5 + rr * 0.013) * (1 - age));
+        fluxCx.lineWidth = 1 + rr * 0.05;
+        fluxCx.beginPath(); fluxCx.arc(p.x, p.y, 3 + age * (14 + rr * 2.2), 0, Math.PI * 2); fluxCx.stroke();
       }
       for (let i = orbs.length - 1; i >= 0; i--) {
         const o = orbs[i]; o.y += o.v; o.ph += 0.045;
         const x = o.x + Math.sin(o.ph) * 4;
-        if ((o.side === LONG && o.y - o.r > fluxCv.height) || (o.side === SHORT && o.y + o.r < 0)) { orbs.splice(i, 1); continue; }
+        if ((o.side === LONG && o.y - o.r > fluxH) || (o.side === SHORT && o.y + o.r < 0)) { orbs.splice(i, 1); continue; }
         const c = COLOR[o.side];
         fluxCx.save();
         if (o.dim) {
@@ -151,9 +175,12 @@
           fluxCx.fillStyle = rgba(c, 0.65);
           fluxCx.beginPath(); fluxCx.arc(x, o.y, o.r, 0, Math.PI * 2); fluxCx.fill();
         } else {
+          // Queue de comete : longueur croissante avec r (grosse liq = trainee
+          // plus longue), orientee par le sens de la vitesse (o.v signe).
           fluxCx.strokeStyle = rgba(c, 0.5); fluxCx.lineWidth = Math.max(1.5, o.r * 0.95);
-          fluxCx.beginPath(); fluxCx.moveTo(x, o.y - o.v * 13); fluxCx.lineTo(x, o.y); fluxCx.stroke();
-          fluxCx.shadowColor = rgba(c, 1); fluxCx.shadowBlur = 18;
+          fluxCx.beginPath(); fluxCx.moveTo(x, o.y - o.v * (8 + o.r * 0.6)); fluxCx.lineTo(x, o.y); fluxCx.stroke();
+          // Glow proportionnel a r : petit orbe = halo sobre, gros = embrasement.
+          fluxCx.shadowColor = rgba(c, 1); fluxCx.shadowBlur = 10 + o.r * 1.2;
           fluxCx.fillStyle = rgba(c, 0.95);
           fluxCx.beginPath(); fluxCx.arc(x, o.y, o.r, 0, Math.PI * 2); fluxCx.fill();
           fluxCx.shadowBlur = 0; fluxCx.fillStyle = "rgba(255,255,255,.97)";
@@ -161,15 +188,18 @@
         }
         fluxCx.restore();
       }
-      // onde d'horizon
+      // onde d'horizon : bitmap DPR (5 px CSS de haut), dessin en px CSS
       const wrect = waveCv.parentElement.getBoundingClientRect();
-      if (waveCv.width !== Math.round(wrect.width)) waveCv.width = Math.round(wrect.width);
-      waveCx.clearRect(0, 0, waveCv.width, 5);
-      waveCx.strokeStyle = "rgba(217,182,77,.10)";
-      waveCx.beginPath(); waveCx.moveTo(0, 2.5); waveCx.lineTo(waveCv.width, 2.5); waveCx.stroke();
+      waveW = Math.round(wrect.width);
+      const wbw = Math.round(waveW * dpr), wbh = Math.round(5 * dpr);
+      if (waveCv.width !== wbw || waveCv.height !== wbh) { waveCv.width = wbw; waveCv.height = wbh; }
+      waveCx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      waveCx.clearRect(0, 0, waveW, 5);
+      waveCx.strokeStyle = isLight ? "rgba(150,120,40,.28)" : "rgba(217,182,77,.10)";
+      waveCx.beginPath(); waveCx.moveTo(0, 2.5); waveCx.lineTo(waveW, 2.5); waveCx.stroke();
       for (let i = waves.length - 1; i >= 0; i--) {
         const p = waves[i]; p.x += p.v;
-        if (p.x - p.w > waveCv.width) { waves.splice(i, 1); continue; }
+        if (p.x - p.w > waveW) { waves.splice(i, 1); continue; }
         const c = COLOR[p.side];
         for (let sgi = 0; sgi < 5; sgi++) {
           const a = 0.85 * (1 - sgi / 5), seg = p.w / 5;
@@ -315,6 +345,16 @@
       /* meme langage que les pictos POI (gp-toggle) : fond nu, or */
       #gonLiqBtn { font-size:14px; line-height:1; opacity:.45; }
       #gonLiqBtn.on { opacity:1; text-shadow:0 0 8px rgba(217,182,77,.6); }
+      /* THEME CLAIR : surcharge des seuls TONS NEUTRES (fond, textes) ; les
+         teintes directionnelles rouge/bleu et l'or restent identiques. Classe
+         .light basculee par l'evenement gon:theme (cf. boot). */
+      #gonLiqPanel.light { background:rgba(250,248,242,.92); border-color:rgba(150,120,40,.28); }
+      #gonLiqPanel.light .gonLiqEv { color:#26303e; }
+      #gonLiqPanel.light .gonLiqEv .who,
+      #gonLiqPanel.light .gonLiqHead .sym,
+      #gonLiqPanel.light #gonLiqDomCap,
+      #gonLiqPanel.light #gonLiqJournal .t { color:#726b4f; }
+      #gonLiqPanel.light #gonLiqDomBar { background:#e4e0d3; }
       /* fenetres etroites : le chart prime sur un panneau decoratif rigide */
       @media (max-width: 860px) { #gonLiqPanel, #gonLiqWave { display:none !important; } }
     `;
@@ -364,6 +404,16 @@
       pct: document.getElementById("gonLiqPct") };
     evList = document.getElementById("gonLiqEvList");
     symEl = document.getElementById("gonLiqSym");
+
+    // THEME : bascule la classe .light du panneau (tons neutres uniquement) au
+    // rythme de l'evenement gon:theme emis par G-Bot. isLight sert aussi a la
+    // ligne d'horizon dessinee en canvas (alpha renforce sur fond clair).
+    const applyTheme = () => {
+      isLight = lumHex(gon.theme && gon.theme.bg) > 0.5;
+      panel.classList.toggle("light", isLight);
+    };
+    applyTheme();
+    window.addEventListener("gon:theme", applyTheme);
 
     // Pas de bouton de bascule (demande Meddy) : le panneau reste toujours
     // affiche (la media query <860px le masque seule). Purge de l'etat herite.

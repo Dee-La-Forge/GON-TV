@@ -1463,6 +1463,7 @@ function sizeCv() {
   cv.width = r.width * dpr; cv.height = r.height * dpr;
   cv.style.width = r.width + 'px'; cv.style.height = r.height + 'px';
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  cdCache.half = 0;    // toute vraie resync (taille OU DPR) remesure le cartouche countdown (evite un decalage vertical apres changement d'ecran)
   applyLiveOffset();   // marge 20 % en bougies : depend de la largeur -> recalcul au resize (si on suit le direct)
   invalidate();
 }
@@ -2332,6 +2333,7 @@ function drawOne(d, isSel) {
         ctx.fill(); ctx.stroke();
       } else if (d.type === 'fib') {
         const xa = Math.min(x1, x2), xb = Math.max(x1, x2);
+        ctx.font = '10px Segoe UI';   // sinon fillText herite d'une police aleatoire (ordre de dessin) -> taille fib non deterministe
         [0, .236, .382, .5, .618, .786, 1].forEach(r => {
           const price = d.b.price + (d.a.price - d.b.price) * r;
           const y = series.priceToCoordinate(price);
@@ -2642,9 +2644,9 @@ load();
 <script src="poi/poi-detector.js?v=3"></script>
 <script src="poi/poi-lifecycle.js?v=5"></script>
 <script src="poi/stream.js?v=1"></script>
-<script src="poi/poi-render.js?v=56"></script>
+<script src="poi/poi-render.js?v=57"></script>
 <script src="poi/poi-feature.js?v=37"></script>
-<script src="poi/liq-flux.js?v=25"></script>
+<script src="poi/liq-flux.js?v=26"></script>
 <script src="poi/whale-sonar.js?v=27"></script>
 <script src="poi/confluence.js?v=25"></script>
 </body>
