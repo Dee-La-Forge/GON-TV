@@ -152,12 +152,12 @@
       // cull sur l'ancre SNAPPEE (celle qui est dessinee) : le createdTs brut
       // peut etre jusqu'a un bucket a droite de l'ancre sur les TF hauts —
       // culler dessus fait disparaitre des niveaux visibles au bord droit.
-      const startSec = snapToBarSec(poi.createdTs);
+      const startSec = anchorSec(poi, poi.createdTs);
       const active = poi.status === "ACTIVE_UNTOUCHED";
       // Fallback aligne sur drawLevel (endMs ?? now) : un POI mort sans champ
       // de touche est DESSINE jusqu'a maintenant — le culler a createdTs le
       // ferait disparaitre des qu'on scrolle sa bougie de naissance hors ecran.
-      const endSec = active ? now / 1000 : snapToBarSec(poi.firstTouchTs ?? poi.statusChangedTs ?? now);
+      const endSec = active ? now / 1000 : anchorSec(poi, poi.firstTouchTs ?? poi.statusChangedTs ?? now);
       return startSec <= vis.to && Math.max(endSec, startSec) >= vis.from;
     }
 
@@ -238,6 +238,46 @@
       return Math.floor(t / s) * s;
     }
 
+    // --- ancre RAFFINEE : la bougie du TF affiche qui TOUCHE le niveau -------
+    // Les timestamps POI sont a resolution M15 (debut de bougie M15). Sur un TF
+    // plus fin, cet instant designe une FENETRE de bougies : snapper a son debut
+    // posait naissance et tick de mort jusqu'a plusieurs bougies AVANT la vraie
+    // touche (mesure live 2m : 39% seulement des ticks sur une bougie touchant
+    // le niveau). On cherche donc DANS la fenetre M15 la premiere bougie du TF
+    // courant dont la plage recouvre la zone du POI — la bougie que l'oeil
+    // attend (97% mesure). Repli : snap M15 classique (fenetre hors donnees).
+    // Memoise par POI+instant (les bougies passees ne changent pas) ; le cache
+    // saute au changement de symbole/TF.
+    let anchorCache = new Map(), anchorKey = "", paintData;
+    function anchorSec(poi, ms) {
+      const snapped = snapToBarSec(ms);
+      const s = Number(gon.tfSec) || 0;
+      if (s <= 0 || s >= 900) return snapped;   // TF >= M15 : bougie contenante deja exacte
+      const ck = (gon.symbol || "") + "|" + (gon.tf || "");
+      if (ck !== anchorKey) { anchorCache.clear(); anchorKey = ck; }
+      const key = (poi.id || "") + "|" + ms;
+      let v = anchorCache.get(key);
+      if (v !== undefined) return v;
+      v = snapped;
+      try {
+        if (paintData === undefined) paintData = gon.series.data() || null;   // 1 copie max par frame
+        const A = paintData;
+        if (A && A.length) {
+          const w0 = Math.floor(ms / 900000) * 900;   // debut de la fenetre M15 (s)
+          let lo = 0, hi = A.length - 1;
+          while (hi - lo > 1) { const m = (lo + hi) >> 1; if (A[m].time < w0) lo = m; else hi = m; }
+          for (let i = lo; i < A.length && A[i].time < w0 + 900; i++) {
+            const b = A[i];
+            if (b.time < w0) continue;
+            if (b.low <= poi.zoneHigh && b.high >= poi.zoneLow) { v = b.time; break; }
+          }
+        }
+      } catch (_) {}
+      if (anchorCache.size > 4000) anchorCache.clear();
+      anchorCache.set(key, v);
+      return v;
+    }
+
     function drawLevel(poi, plotW, now, wantLabel, centeredPrices) {
       const entryPrice = poi.entry ?? poi.entryPrice;
       const yEntry = entryPrice == null ? null : gon.priceToY(entryPrice);
@@ -251,12 +291,12 @@
       // fin-de-gap posaient l'origine APRES la naissance — jusqu'a DANS LE FUTUR
       // pour un niveau recent — et la pastille flottait dans le vide.)
       const originMs = poi.createdTs;
-      let x1 = gon.timeToX(snapToBarSec(originMs));
-      if (x1 == null || !isFinite(x1)) x1 = gon.timeToX(snapToBarSec(poi.availableAt));
+      let x1 = gon.timeToX(anchorSec(poi, originMs));
+      if (x1 == null || !isFinite(x1)) x1 = gon.timeToX(anchorSec(poi, poi.availableAt));
       if (x1 == null || !isFinite(x1)) return null;
 
       const endMs = active ? now : (poi.firstTouchTs ?? poi.statusChangedTs ?? now);
-      let x2 = active ? plotW : gon.timeToX(snapToBarSec(endMs));
+      let x2 = active ? plotW : gon.timeToX(anchorSec(poi, endMs));
       if (active && (x2 == null || !isFinite(x2))) x2 = plotW;
       // Niveau MORT : trait BORNE. Une queue pointillee qui se termine PILE sur
       // la bougie de mort (x2) et remonte au plus DEAD_TAIL_PX vers la gauche
@@ -466,7 +506,7 @@
       const hue = PROV_HUE[p.direction] || PROV_HUE.long;
       const entry = p.entry ?? p.entryPrice;
       const y = entry == null ? null : gon.priceToY(entry);
-      let x1 = gon.timeToX(snapToBarSec(p.createdTs));
+      let x1 = gon.timeToX(anchorSec(p, p.createdTs));
       if (y == null || !isFinite(y) || x1 == null || !isFinite(x1)) return;
       // Hors echelle de prix : ne rien dessiner (sinon le chip, clampe dans
       // le pane, flotterait au bord sans ligne associee — niveau fantome).
@@ -500,6 +540,7 @@
     function paint() {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       hasEliteVisible = false;
+      paintData = undefined;   // le cache de bougies (anchorSec) vit UNE frame
       // Etat stable "rien a montrer" (masque / aucun POI) : on efface, c'est
       // definitif tant que la vue ne change pas.
       if (!visible || (!pois.length && !prov)) { ctx.clearRect(0, 0, cv.width, cv.height); lastGoodTf = gon.tf; lastGoodSym = gon.symbol; return true; }
@@ -648,7 +689,7 @@
         if (p.win !== 1 && p.win !== 0) continue;
         const t = p.firstTouchTs ?? p.statusChangedTs;
         if (!t) continue;
-        const sec = snapToBarSec(t);
+        const sec = anchorSec(p, t);
         if (vis && (sec < vis.from || sec > vis.to)) continue;
         const e = p.entry ?? p.entryPrice;
         if (!(e >= pLo && e <= pHi)) continue;
