@@ -2636,6 +2636,12 @@ if (location.hostname.endsWith('github.io')) {
 }
 
 load();
+
+/* G-ON : bouclier anti-panne GitHub (page licorne). Apres UNE visite reussie,
+   le service worker garde une copie locale de l'app : si GitHub repond 5xx,
+   l'app demarre quand meme depuis le cache et vit sur les flux Binance.
+   Network-first : les mises a jour passent comme avant (watcher 3 min inclus). */
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 </script>
 <!-- G-ON : moteur POI (modules purs testes) + feature live + rendu -->
 <script src="poi/poi-config.js?v=3"></script>
