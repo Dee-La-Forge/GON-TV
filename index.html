@@ -1184,7 +1184,15 @@ function startPoll(seq) {
         if (k.length === 1000) {   // page pleine = RATTRAPAGE (trades historiques) : pas d'alerte rétroactive
           gapFilling = true; try { applyTrades(k); } finally { gapFilling = false; }
           fillGapSecSoon();        // draine le reste (gardé), le prochain tick live ré-arme les alertes
-        } else if (k.length) applyTrades(k);   // lot court = à jour = LIVE : les alertes tirent normalement
+        } else if (k.length) {
+          // R2 (audit 6) : sur symbole ILLIQUIDE, une veille entière peut tenir
+          // en <1000 trades — le seuil par taille de page classait ce lot "live"
+          // et rejouait des alertes d'il y a une heure. Le juge de paix est
+          // l'ÂGE du dernier trade : vieux de >15 s = rattrapage, alertes muettes.
+          const stale = Date.now() + clockOff - k[k.length - 1].T > 15000;
+          if (stale) { gapFilling = true; try { applyTrades(k); } finally { gapFilling = false; } }
+          else applyTrades(k);   // lot court ET frais = LIVE : les alertes tirent normalement
+        }
       }
       else k.slice(-2).forEach(x => applyBar(x));  // seau le plus ancien du rollup potentiellement partiel : écarté
     } catch { backoff = 5; failed(); }
@@ -1532,12 +1540,33 @@ function resetTransient() { temp = null; measure = null; select(null); }
 function clearDrawings() { drawings = []; resetTransient(); saveDrawings(); }
 
 /* --- ancrage TEMPS ABSOLU : les tracés survivent au changement de TF --- */
+/* R3 (audit 6) : sur les TF MENSUELS la grille est calendaire (28-31 j) mais
+   l'extrapolation hors données utilisait un pas FIXE de 30 j → une ancre posée
+   dans la marge glissait (~3 %/mois d'écart) quand les vraies bougies
+   naissaient. Marche en barres calendaires via bucketStart/barEnd (bornée). */
+const MONTHLY_WALK_CAP = 4800;   // ~400 ans en 1M : au-delà, repli linéaire (dégénéré)
 function lOf(t) {            // temps unix → index logique (extrapole hors données)
   const a = dataNow();
   if (!a.length || t == null) return null;
-  const sec = tfDef().sec;
-  if (t <= a[0].time) return (t - a[0].time) / sec;
-  if (t >= a[a.length - 1].time) return a.length - 1 + (t - a[a.length - 1].time) / sec;
+  const d = tfDef(), sec = d.sec;
+  if (t <= a[0].time) {
+    if (d.src === '1M') {
+      const open = bucketStart(t), end = barEnd(open);
+      const f = (t - open) / (end - open || 1);
+      let n = 0, b = end;
+      while (b <= a[0].time && n < MONTHLY_WALK_CAP) { n++; b = barEnd(b); }
+      if (n < MONTHLY_WALK_CAP) return f - n;   // n barres calendaires avant a[0], + fraction dans la sienne
+    }
+    return (t - a[0].time) / sec;
+  }
+  if (t >= a[a.length - 1].time) {
+    if (d.src === '1M') {
+      let n = 0, cur = a[a.length - 1].time;
+      while (barEnd(cur) <= t && n < MONTHLY_WALK_CAP) { cur = barEnd(cur); n++; }
+      if (n < MONTHLY_WALK_CAP) return a.length - 1 + n + (t - cur) / (barEnd(cur) - cur || 1);
+    }
+    return a.length - 1 + (t - a[a.length - 1].time) / sec;
+  }
   let lo = 0, hi = a.length - 1;
   while (hi - lo > 1) { const m = (lo + hi) >> 1; if (a[m].time <= t) lo = m; else hi = m; }
   return lo + (t - a[lo].time) / (a[hi].time - a[lo].time);
@@ -1545,10 +1574,30 @@ function lOf(t) {            // temps unix → index logique (extrapole hors don
 function tOf(l) {            // index logique → temps unix
   const a = dataNow();
   if (!a.length || l == null) return null;
-  const sec = tfDef().sec;
+  const d = tfDef(), sec = d.sec;
   const i = Math.floor(l);
-  if (i < 0) return a[0].time + l * sec;
-  if (i >= a.length - 1) return a[a.length - 1].time + (l - (a.length - 1)) * sec;
+  if (i < 0) {
+    if (d.src === '1M') {
+      const k = Math.ceil(-l), f = l + k;   // k barres avant a[0], fraction f dans la barre
+      if (k < MONTHLY_WALK_CAP) {
+        let open = a[0].time;
+        for (let j = 0; j < k; j++) open = bucketStart(open - 1);
+        return open + f * (barEnd(open) - open);
+      }
+    }
+    return a[0].time + l * sec;
+  }
+  if (i >= a.length - 1) {
+    if (d.src === '1M') {
+      const steps = Math.floor(l - (a.length - 1)), f = l - (a.length - 1) - steps;
+      if (steps < MONTHLY_WALK_CAP) {
+        let open = a[a.length - 1].time;
+        for (let j = 0; j < steps; j++) open = barEnd(open);
+        return open + f * (barEnd(open) - open);
+      }
+    }
+    return a[a.length - 1].time + (l - (a.length - 1)) * sec;
+  }
   return a[i].time + (l - i) * (a[i + 1].time - a[i].time);
 }
 let saveFailed = false, saveTimer = null;
@@ -2685,7 +2734,7 @@ if ('serviceWorker' in navigator && location.hostname.endsWith('github.io')) nav
 <script src="poi/poi-detector.js?v=3"></script>
 <script src="poi/poi-lifecycle.js?v=6"></script>
 <script src="poi/stream.js?v=1"></script>
-<script src="poi/poi-render.js?v=66"></script>
+<script src="poi/poi-render.js?v=67"></script>
 <script src="poi/poi-feature.js?v=40"></script>
 <script src="poi/liq-flux.js?v=29"></script>
 <script src="poi/whale-sonar.js?v=28"></script>

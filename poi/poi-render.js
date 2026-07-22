@@ -95,6 +95,7 @@
     // hasEliteVisible arme le repaint continu ; sans elite a l'ecran, la
     // boucle reste purement dirty-based (zero repaint inutile).
     let pulseK = 1, hasEliteVisible = false, lastPulsePaint = 0;
+    let glowBudgetOK = true;   // R4 : glow coupé au-delà de GLOW_MAX_LEVELS traits dessinés (perf)
     const mark = () => { forceDirty = true; };
 
     // --- tokens de theme (dark/light par luminance du fond) ------------------
@@ -353,8 +354,13 @@
       // PLUS INTENSE (pas d'or sur la ligne : lisibilite long/short d'abord) ;
       // leur or vit sur pastille + chip.
       const elite = active && Number(poi.score) >= ELITE_SCORE;
-      if (elite) hasEliteVisible = true;
-      const glowScale = elite ? 1.7 * pulseK : active ? 1 : 0;
+      // R4 (audit 6) : au-delà du budget (vue FORT très dézoomée, centaines de
+      // traits), le glow (shadowBlur = rasterisation CPU ×5 passes) est coupé —
+      // rendu plat net, hiérarchie conservée par l'épaisseur élite. Même
+      // principe que le plafond des ✦. La pulsation s'éteint aussi (invisible
+      // sans glow) pour ne pas payer 30 fps de scène complète.
+      if (elite && glowBudgetOK) hasEliteVisible = true;
+      const glowScale = !glowBudgetOK ? 0 : elite ? 1.7 * pulseK : active ? 1 : 0;
       // Elite : trait nettement plus epais + pulsation lumineuse (pulseK sur les
       // alphas du laser) — les standards restent des filaments ultra fins.
       const lw = elite ? width + 1.25 : width;
@@ -675,6 +681,7 @@
         // entier selon le zoom -> sinon il "reapparait" en dezoomant (bug).
         const labelled = new Set(keptLive.slice(0, maxTags).map((p) => p.id));
         keptDead.forEach((p) => labelled.add(p.id));
+        glowBudgetOK = shown.length <= 80;   // R4 : budget de lignes laser avec halo
         shown.sort((a, b) => rank(a) - rank(b));   // morts d'abord (labels ancres) puis vivants (colonne droite)
         const tags = [];
         const centeredPrices = new Set();
