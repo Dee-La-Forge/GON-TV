@@ -51,9 +51,9 @@
     // purge (rAF suspendu) et waves croissait sans borne toute la nuit.
     if (panelShown()) {
       // Rampe log ACCENTUEE : petites liq discretes (~5-8 px), grosses
-      // spectaculaires (jusqu'a ~34 px). Pente forte -> hierarchie nette sans
+      // spectaculaires (jusqu'a ~44 px). Pente forte -> hierarchie nette sans
       // seuil discret (choix utilisateur : continu accentue).
-      const r = Math.min(34, Math.max(5, (Math.log10(usd) - 4.1) * 8));
+      const r = Math.min(44, Math.max(5, (Math.log10(usd) - 4.1) * 10));
       if (orbs.length < 140) {
         const w = fluxW || 130, h = fluxH || 300;
         const x = 12 + Math.random() * Math.max(20, w - 24);
@@ -178,7 +178,7 @@
           // Queue de comete : longueur croissante avec r (grosse liq = trainee
           // plus longue), orientee par le sens de la vitesse (o.v signe).
           fluxCx.strokeStyle = rgba(c, 0.5); fluxCx.lineWidth = Math.max(1.5, o.r * 0.95);
-          fluxCx.beginPath(); fluxCx.moveTo(x, o.y - o.v * (8 + o.r * 0.6)); fluxCx.lineTo(x, o.y); fluxCx.stroke();
+          fluxCx.beginPath(); fluxCx.moveTo(x, o.y - o.v * (16 + o.r * 1.2)); fluxCx.lineTo(x, o.y); fluxCx.stroke();
           // Glow proportionnel a r : petit orbe = halo sobre, gros = embrasement.
           fluxCx.shadowColor = rgba(c, 1); fluxCx.shadowBlur = 10 + o.r * 1.2;
           fluxCx.fillStyle = rgba(c, 0.95);
