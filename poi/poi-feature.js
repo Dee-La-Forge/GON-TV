@@ -724,22 +724,22 @@
       document.head.appendChild(css);
     }
 
-    // Vue POI a 4 ETATS (cycle sur le picto oeil) :
-    //   fort       -> morts + vivants, mais SCORE ELEVE seulement (plancher 80)
-    //   vivant     -> vivants uniquement, tous scores
-    //   fortvivant -> vivants uniquement + score eleve (plancher 80)
-    //   none       -> tout masque
+    // Vue POI a 3 ETATS (cycle sur le picto oeil, demande Meddy) :
+    //   fort   -> vivants + morts forts (plancher 80 sur les morts)
+    //   vivant -> vivants uniquement, tous scores
+    //   none   -> tout masque
     // Le plancher FORT s'ajoute au curseur de score (qui reste le reglage fin :
     // score effectif = max(curseur, plancher du mode)).
     const VIEW_KEY = "gon.poi.view";
-    const VIEW_CYCLE = ["fort", "vivant", "fortvivant", "none"];
+    const VIEW_CYCLE = ["fort", "vivant", "none"];
     const FORT_FLOOR = 80;
     let viewMode = "fort";
     try {
       let saved = localStorage.getItem(VIEW_KEY);
-      // migration des anciens libelles (live/all) vers les nouveaux
+      // migration des anciens libelles (live/all/fortvivant) vers les nouveaux
       if (saved === "live") saved = "vivant";
       else if (saved === "all") saved = "fort";
+      else if (saved === "fortvivant") saved = "vivant";   // etat supprime du cycle
       viewMode = saved || (localStorage.getItem("gon.poi.showConsumed") === "1" ? "fort" : "vivant");
       if (!VIEW_CYCLE.includes(viewMode)) viewMode = "fort";
       localStorage.removeItem("gon.poi.showConsumed");   // cle de migration morte : nettoyee une fois lue
@@ -810,10 +810,9 @@
     // Le plancher FORT (80) NE cache JAMAIS les vivants en mode FORT : le score
     // sert a desencombrer les MORTS (nombreux), pas a masquer les vivants (peu,
     // actionnables). Le curseur reste le reglage fin, commun.
-    //   FORT       -> morts filtres a >=80,  vivants = curseur (tous)
-    //   VIVANT     -> vivants = curseur,      (pas de morts)
-    //   FORT VIVANT-> vivants filtres a >=80, (pas de morts)
-    const liveMin = () => Math.max(minScore, viewMode === "fortvivant" ? FORT_FLOOR : 0);
+    //   FORT   -> morts filtres a >=80, vivants = curseur (tous)
+    //   VIVANT -> vivants = curseur,    (pas de morts)
+    const liveMin = () => Math.max(minScore, 0);
     const deadMin = () => Math.max(minScore, viewMode === "fort" ? FORT_FLOOR : 0);
     const applyToggle = () => {
       render.setVisible(viewMode !== "none");
@@ -822,12 +821,11 @@
       render.setDeadMinScore(deadMin());
       togIcon.innerHTML = viewMode === "none" ? EYE_SLASH : EYE_OPEN;
       // opacite : pleins = morts inclus (fort), attenue = vivants seuls
-      togIcon.style.opacity = (viewMode === "vivant" || viewMode === "fortvivant") ? "0.55" : "1";
+      togIcon.style.opacity = viewMode === "vivant" ? "0.55" : "1";
       toggle.title =
-        viewMode === "fort" ? "FORT : morts + vivants, scores eleves (>=80) — cliquer : vivants"
-        : viewMode === "vivant" ? "VIVANTS : niveaux vivants (tous scores) — cliquer : forts vivants"
-        : viewMode === "fortvivant" ? "FORTS VIVANTS : vivants + scores eleves (>=80) — cliquer : masquer"
-        : "Niveaux masques — cliquer : FORT (morts + vivants, scores eleves)";
+        viewMode === "fort" ? "FORT : vivants + morts forts (>=80) — cliquer : vivants seuls"
+        : viewMode === "vivant" ? "VIVANTS : niveaux vivants (tous scores) — cliquer : masquer"
+        : "Niveaux masques — cliquer : FORT (vivants + morts forts)";
     };
     toggle.onclick = () => {
       viewMode = VIEW_CYCLE[(VIEW_CYCLE.indexOf(viewMode) + 1) % VIEW_CYCLE.length];
