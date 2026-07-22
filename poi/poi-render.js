@@ -220,14 +220,11 @@
       // la meme fonction qui positionne les bougies qui positionne les pastilles.
       const bucket = gon.bucketStart;
       if (typeof bucket === "function") {
-        // TF FINS (< 15m) : les timestamps POI sont M15 (900s). Sur un TF qui NE
-        // DIVISE PAS 15m (2m/4m/8m), la bougie CONTENANTE (floor) tombe sur la
-        // bougie PRECEDENTE (ex. 15:15 -> 15:14, une demi-bougie trop tot). On
-        // garde donc l'intention CEIL : 1re bougie PLEINE a partir de l'instant
-        // M15. Sur un TF divisant 15m (1m/3m/5m), l'origine est deja alignee ->
-        // bucket(t) === t, ceil == exact. Ailleurs (>= 15m, hebdo, mensuel),
-        // bucket(t) = bougie contenante = exactement la cible.
-        if (s < 900) { const b = bucket(t); return b >= t ? b : bucket(t + s); }
+        // Equipe debug 2026-07-22 : la bougie CONTENANTE partout (floor). L'ancien
+        // CEIL sous M15 (« 1re bougie PLEINE ») decalait le repli d'UNE bougie a
+        // droite sur 48-87 % des fenetres 2m/4m/8m — pose sur un centre de bougie
+        // pixel-parfait... de la MAUVAISE bougie. Depuis que xOf snape au centre,
+        // la contenante est le choix honnete (1/2 bougie tot au pire, jamais 1 tard).
         return bucket(t);
       }
       // Repli si le seam bucketStart n'est pas expose (G-Bot anterieur) : ancienne
@@ -277,28 +274,81 @@
         const A = paintData;
         if (A && A.length) {
           const w0 = Math.floor(ms / 900000) * 900;   // debut de la fenetre M15 (s)
-          cacheable = A[0].time <= w0 && A[A.length - 1].time >= w0 + 900;
-          let lo = 0, hi = A.length - 1;
-          while (hi - lo > 1) { const m = (lo + hi) >> 1; if (A[m].time < w0) lo = m; else hi = m; }
-          let bestV = null, zoneFirst = null, lineFound = false;
+          const tSec = ms / 1000;
           const e = poi.entry ?? poi.entryPrice;   // la LIGNE visible est au prix d'entree
-          for (let i = lo; i < A.length && A[i].time < w0 + 900; i++) {
-            const b = A[i];
-            if (b.time < w0) continue;
-            if (birth) {
+          // Enveloppe zone∪cluster (equipe debug) : les invalidations d'archive
+          // cassent le CLUSTER (qui deborde la zone) — tester la zone seule
+          // ratait la bougie d'invalidation (13/14 des fallbacks 1m mesures).
+          const zLo = Math.min(poi.zoneLow, poi.clusterLow ?? poi.zoneLow);
+          const zHi = Math.max(poi.zoneHigh, poi.clusterHigh ?? poi.zoneHigh);
+          // BOUGIE CHEVAUCHANTE INCLUSE (equipe debug — cause DOMINANTE mesuree :
+          // 900 s n'est multiple ni de 120/240/480, une fenetre M15 sur deux
+          // commence au MILIEU d'une bougie 2m/4m/8m ; l'exclure posait la
+          // pastille sur la bougie d'a cote dans 11-42 % des morts et 7-22 %
+          // des naissances). Une bougie appartient a la fenetre si son
+          // INTERVALLE [time, time+s) l'intersecte — pas si son open y est.
+          const seek = (from, to, mode, first) => {   // bougie qui touche, 1re (first) ou la PLUS PROCHE de tSec
+            const f0 = from - s;   // positionne la recherche pour attraper la chevauchante
+            let lo = 0, hi = A.length - 1;
+            while (hi - lo > 1) { const m = (lo + hi) >> 1; if (A[m].time < f0) lo = m; else hi = m; }
+            let best = null, bd = Infinity;
+            for (let i = lo; i < A.length && A[i].time < to; i++) {
+              const b = A[i];
+              if (b.time + s <= from) continue;   // finit avant la fenetre : vraiment exclue
+              const hit = mode === "line" ? (e != null && b.low <= e && b.high >= e)
+                : (b.low <= zHi && b.high >= zLo);
+              if (!hit) continue;
+              if (first) return b.time;
+              const d = Math.abs(b.time - tSec);
+              if (d < bd) { bd = d; best = b.time; }
+            }
+            return best;
+          };
+          if (birth) {
+            cacheable = A[0].time <= w0 && A[A.length - 1].time >= w0 + 900;
+            // FIDELITE (equipe debug) : fpTimeStart/fpTimeEnd = datation REELLE
+            // de la formation du cluster (ms, 9821/9821 valides dans l'archive,
+            // pose aussi par le detecteur live). L'extreme se cherche dans CETTE
+            // plage — la bougie qui a forme le niveau, plus une heuristique de
+            // fenetre entiere. Repli : fenetre M15 complete.
+            let from = w0, to = w0 + 900;
+            if (Number.isFinite(poi.fpTimeStart) && Number.isFinite(poi.fpTimeEnd) && poi.fpTimeEnd > poi.fpTimeStart) {
+              from = Math.max(w0, Math.floor(poi.fpTimeStart / 1000));
+              to = Math.min(w0 + 900, Math.ceil(poi.fpTimeEnd / 1000) + 1);
+              if (to <= from) { from = w0; to = w0 + 900; }
+            }
+            const f0 = from - s;   // chevauchante incluse aussi pour l'extreme de naissance
+            let lo = 0, hi = A.length - 1;
+            while (hi - lo > 1) { const m = (lo + hi) >> 1; if (A[m].time < f0) lo = m; else hi = m; }
+            let bestV = null;
+            for (let i = lo; i < A.length && A[i].time < to; i++) {
+              const b = A[i];
+              if (b.time + s <= from) continue;
               if (poi.direction === "short") { if (bestV == null || b.high > bestV) { bestV = b.high; v = b.time; } }
               else { if (bestV == null || b.low < bestV) { bestV = b.low; v = b.time; } }
-            } else {
-              // TOUCHE/MORT : priorite a la 1re bougie qui CROISE la ligne
-              // d'entree (l'entree vit a l'INTERIEUR de la zone : une bougie
-              // peut effleurer la zone sans atteindre le trait — tick pose sur
-              // une bougie qui ne touche visiblement rien). Repli : 1re bougie
-              // recouvrant la zone (touche de zone, semantique moteur).
-              if (e != null && b.low <= e && b.high >= e) { v = b.time; lineFound = true; break; }
-              if (zoneFirst == null && b.low <= poi.zoneHigh && b.high >= poi.zoneLow) zoneFirst = b.time;
             }
+          } else {
+            // TOUCHE/MORT — recherche ETAGEE (equipe debug 2026-07-22) : mesure
+            // profonde 2m = 17 % des morts d'ARCHIVE n'avaient AUCUNE bougie
+            // locale touchant ligne/zone dans leur fenetre M15 (regles Antho —
+            // 147/199 INVALIDATED par cassure — vs rollup local) : la pastille
+            // tombait via le repli CEIL sur une bougie qui ne touche RIEN, a
+            // 10-35 bougies de la vraie traversee. Etages :
+            //   1. fenetre exacte : 1re bougie qui CROISE la ligne, repli zone ;
+            //   2. ±1 fenetre M15 : bougie-ligne la PLUS PROCHE de l'instant ;
+            //   3. ±45 min : bougie-zone la plus proche (traversee decalee) ;
+            //   4. bougie CONTENANTE de l'instant (jamais le CEIL dans le vide).
+            v = seek(w0, w0 + 900, "line", true)
+              ?? seek(w0, w0 + 900, "zone", true)
+              ?? seek(w0 - 900, w0 + 1800, "line", false)
+              ?? seek(w0 - 2700, w0 + 3600, "zone", false)
+              ?? (() => {
+                const bkt = typeof gon.bucketStart === "function" ? gon.bucketStart(tSec) : snapped;
+                return (bkt >= A[0].time && bkt <= A[A.length - 1].time) ? bkt : snapped;
+              })();
+            // le cache doit couvrir TOUTE la plage de recherche elargie
+            cacheable = A[0].time <= w0 - 2700 && A[A.length - 1].time >= w0 + 3600;
           }
-          if (!birth && !lineFound && zoneFirst != null) v = zoneFirst;
         }
       } catch (_) {}
       if (cacheable) {
