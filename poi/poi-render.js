@@ -30,9 +30,9 @@
     chipActive: 1.0, chipTouched: 0.90, chipDead: 0.75,
     connector: 0.60
   };
-  const W = { active: 0.75, touched: 0.75, dead: 0.75, casingExtra: 1.5 };   // traits fins (spec)
+  const W = { active: 0.5, touched: 0.5, dead: 0.5, casingExtra: 1.25 };   // traits ULTRA fins (laser) — les elites seules s'epaississent
   const DASH = { active: null, touched: [7, 4], dead: [1.5, 3.5] };
-  const TAG_H = 19, TAG_GAP = 3, MAX_LEVELS = 300, DECLUTTER_GAP_PX = 8;
+  const TAG_H = 17, TAG_GAP = 3, MAX_LEVELS = 300, DECLUTTER_GAP_PX = 8;
   // Niveaux d'ELITE (S >= seuil) : laser DORE (charte G-Bot) au lieu du laser
   // directionnel — les meilleurs scores se reperent d'un coup d'oeil.
   const ELITE_SCORE = 90;
@@ -49,8 +49,8 @@
   // d'un coup. Filtre par le curseur (minScore), pas par le plancher FORT (>=80)
   // qui ne desencombre que les morts d'ARCHIVE (nombreux).
   const RECENT_DEAD_MS = 24 * 3600 * 1000;
-  const PRICE_FONT = "600 12px Consolas, 'Roboto Mono', monospace";
-  const SCORE_FONT = "700 10px Consolas, 'Roboto Mono', monospace";
+  const PRICE_FONT = "600 11px Consolas, 'Roboto Mono', monospace";
+  const SCORE_FONT = "700 9px Consolas, 'Roboto Mono', monospace";
   const CHIP_PAD = 6, CHIP_RULE_GAP = 5;
 
   function hexToRgb(hex) {
@@ -351,7 +351,10 @@
       const elite = active && Number(poi.score) >= ELITE_SCORE;
       if (elite) hasEliteVisible = true;
       const glowScale = elite ? 1.7 * pulseK : active ? 1 : touched ? 0.45 : 0;
-      const lw = elite ? width + 0.75 : width;   // trait elite plus epais : hierarchie au premier regard
+      // Elite : trait nettement plus epais + pulsation lumineuse (pulseK sur
+      // les alphas du laser) — la hierarchie de force se lit au premier regard,
+      // les standards restent des filaments laser ultra fins.
+      const lw = elite ? width + 1.25 : width;
       // (La LIGNE FANTOME pleine largeur des morts est dessinee dans une passe
       // dediee AVANT, independante du temps — voir drawGhostLines. Ici on ne
       // trace que la portee reelle naissance->mort, nette.)
