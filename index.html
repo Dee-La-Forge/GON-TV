@@ -614,9 +614,20 @@ function validPersisted(o) {   // {b, atStart, fi, lm, la} sain et pas trop pér
   const maxAge = isSecTf() ? 90000 : Math.min(18000 * TFSEC[tfDef().src] * 1000, 30 * 86400e3);
   const age = Date.now() - o.t;
   if (typeof o.t !== 'number' || age < 0 || age > maxAge) return false;   // age < 0 : horloge reculée → rejeter
+  // Trous INTÉRIEURS (revue) : une fusion IDB+LS sans recouvrement pouvait
+  // coudre préfixe profond + queue fraîche avec un TROU au milieu — que rien
+  // ne comble jamais (fillGap n'étend que la queue), qui se re-sauvegarde en
+  // boucle, et sur lequel lOf/anchorSec posent des ancres décalées de
+  // plusieurs bougies (le symptôme « pastilles décalées sous M15 »). On
+  // REJETTE tout enregistrement troué → rechargement frais = auto-réparation.
+  // Exceptions : TF secondes (seau absent = zéro trade, légitime) et grille
+  // mensuelle (pas calendaire variable).
+  const chkGap = !isSecTf() && tfDef().src !== '1M';
+  const step = TFSEC[tfDef().src] * (tfDef().fact || 1);
   let prev = -Infinity;   // validation profonde : OHLCV numérique, temps STRICTEMENT croissant
   for (const c of o.b) {
     if (!c || !numOk(c.time) || c.time <= prev || !numOk(c.open) || !numOk(c.high) || !numOk(c.low) || !numOk(c.close) || !numOk(c.volume)) return false;
+    if (chkGap && prev > -Infinity && c.time - prev > 3 * step) return false;   // trou intérieur = enregistrement mort
     prev = c.time;
   }
   return true;
@@ -686,7 +697,11 @@ async function loadPersistedDeep() {   // IDB (PROFONDEUR) ⊕ localStorage (FRA
   // localStorage plus frais (écrit au pagehide) mais tronqué à BARS_CAP : on
   // greffe sa queue fraîche sur la profondeur IDB — sinon « le plus frais
   // gagne » jetait 18 000 bougies d'historique à chaque rechargement.
+  // GARDE anti-trou (revue) : coudre exige un RECOUVREMENT — si la fin du
+  // profond n'atteint pas le début du frais, la couture créerait un trou
+  // intérieur permanent → on prend la queue fraîche seule (fillGap complète).
   const cut = ls.b[0].time;
+  if (o.b[o.b.length - 1].time + 2 * tfDef().sec < cut) return ls;
   const b = o.b.filter(c => c.time < cut).concat(ls.b);   // strictement croissant : préfixe < cut, puis ls croissant
   return { v: o.v, t: ls.t, atStart: o.atStart, fi: o.fi, lm: ls.lm, la: ls.la, b };
 }
