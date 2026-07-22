@@ -40,7 +40,7 @@
     // Visuels UNIQUEMENT quand le panneau est affiche : masque, rien ne les
     // purge (rAF suspendu) et waves croissait sans borne toute la nuit.
     if (panelShown()) {
-      const r = Math.min(15, Math.max(4.5, (Math.log10(usd) - 4.1) * 4.4));
+      const r = Math.min(20, Math.max(6, (Math.log10(usd) - 4.1) * 5.6));
       if (orbs.length < 140) {
         const w = fluxCv.width || 130, h = fluxCv.height || 300;
         const x = 12 + Math.random() * Math.max(20, w - 24);
@@ -73,7 +73,7 @@
     if (panelShown() && orbs.length < 140) {
       const w = fluxCv.width || 130, h = fluxCv.height || 300;
       orbs.push({ side, dim: true,
-        r: Math.min(4.5, Math.max(2.2, (Math.log10(usd) - 3.3) * 1.15)),
+        r: Math.min(7, Math.max(3.5, (Math.log10(usd) - 3.3) * 1.7)),
         x: 12 + Math.random() * Math.max(20, w - 24),
         y: side === LONG ? -3 : h + 3, ph: Math.random() * 6.28,
         v: (0.5 + Math.random() * 0.8) * (side === LONG ? 1 : -1) });

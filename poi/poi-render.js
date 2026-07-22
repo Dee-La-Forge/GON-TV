@@ -32,7 +32,7 @@
   };
   const W = { active: 0.75, touched: 0.75, dead: 0.75, casingExtra: 1.5 };   // traits fins (spec)
   const DASH = { active: null, touched: [7, 4], dead: [1.5, 3.5] };
-  const TAG_H = 21, TAG_GAP = 3, MAX_LEVELS = 300, DECLUTTER_GAP_PX = 8;
+  const TAG_H = 24, TAG_GAP = 3, MAX_LEVELS = 300, DECLUTTER_GAP_PX = 8;
   // Niveaux d'ELITE (S >= seuil) : laser DORE (charte G-Bot) au lieu du laser
   // directionnel — les meilleurs scores se reperent d'un coup d'oeil.
   const ELITE_SCORE = 90;
@@ -44,8 +44,8 @@
   // ligne de prix permanente (les faibles restent en detail naissance->mort
   // pres de l'evenement). Reduit fortement la densite.
   const GHOST_MIN_SCORE = 90;
-  const PRICE_FONT = "600 13px Consolas, 'Roboto Mono', monospace";
-  const SCORE_FONT = "700 12px Consolas, 'Roboto Mono', monospace";
+  const PRICE_FONT = "600 15px Consolas, 'Roboto Mono', monospace";
+  const SCORE_FONT = "700 13px Consolas, 'Roboto Mono', monospace";
   const CHIP_PAD = 6, CHIP_RULE_GAP = 5;
 
   function hexToRgb(hex) {
