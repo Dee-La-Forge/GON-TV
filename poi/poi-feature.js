@@ -179,6 +179,12 @@
       };
     }).filter((p) => Number.isFinite(p.createdTs) && Number.isFinite(p.zoneLow) && Number.isFinite(p.zoneHigh) && p.zoneHigh > p.zoneLow
       && Number.isFinite(p.score));   // score NaN -> POI jamais affiche (NaN>=min faux) : on l'exclut proprement
+    // Audit 2026-07-22 : en panne GitHub le service worker sert la DERNIERE
+    // archive encachee sans aucun signal — si elle date, le trou entre son
+    // cutoff et la fenetre de bootstrap (24-48 h) est invisible. On alerte.
+    if (lifecycleValidAfterTs && Date.now() - lifecycleValidAfterTs > 24 * 3600e3)
+      console.warn("[POI] archive possiblement perimee (cache hors-panne ?)", ticker,
+        new Date(lifecycleValidAfterTs).toISOString());
     return { pois: archivePois, cutoff, lifecycleValidAfterTs };
   }
 
@@ -539,6 +545,11 @@
     let nextId = poiLastTradeId + 1, caughtUp = false;
     for (let page = 0; page < 50; page++) {
       if (stale()) return;
+      // Espacement anti-rafale (audit) : 50 pages d'un coup = jusqu'a 1000 de
+      // poids sans pause au reveil machine, en simultane avec fillGap et les
+      // reconnexions — on provoque le 429 au lieu de l'eviter. Meme cadence
+      // que le bootstrap (~75 ms).
+      if (page > 0) await new Promise((r) => setTimeout(r, 75));
       const trades = await fetchAggTrades(ticker, { fromId: nextId, limit: 1000 }, signal);
       // Re-check APRES l'await : un changement de symbole (ou une socket
       // remplacee — deux recovery concurrentes pagineraient le meme range en
@@ -869,7 +880,11 @@
       const closed = (!poiRecovering && isStreamLive() && poiAccumulator) ? poiAccumulator.flush(flushClock) : [];
       closed.forEach(processClosedFootprint);
       refreshPoiProvisional();   // auto-gouverne : flux mort/recovery -> se detruit
-      render.repaint();
+      // Audit 2026-07-22 : le repaint inconditionnel forcait un paint COMPLET
+      // (~10k POI filtres + tris + lasers) chaque seconde meme a vue figee.
+      // Les mutations reelles marquent deja le rendu (setPois/setProvisional) ;
+      // on ne garde qu'une ceinture sur les buckets clos.
+      if (closed.length) render.repaint();
       if (gon.symbol && gon.symbol !== currentSymbol) { currentSymbol = gon.symbol; startPoiStream(currentSymbol); }
       updateDiag();
     }, 1000);

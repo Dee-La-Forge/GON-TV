@@ -65,7 +65,10 @@
     else if (mitigated) status = "MITIGATED";
     else if (touched) status = "TOUCHED";
 
-    const newTouchCandle = touched && poi.lastTouchCandleTs !== candleTs;
+    // Audit 2026-07-22 : != recomptait une bougie deja comptee quand un re-seed
+    // rejouait une bougie anterieure au pointeur (touchCount gonflait). Une
+    // bougie <= la derniere comptee ne compte jamais deux fois.
+    const newTouchCandle = touched && !(Number.isFinite(poi.lastTouchCandleTs) && poi.lastTouchCandleTs >= candleTs);
     return Object.freeze(Object.assign({}, poi, {
       status,
       firstTouchTs: poi.firstTouchTs ?? (touched ? candleTs : null),
@@ -104,7 +107,7 @@
     const candle = { high, low };
     if (!zoneTouched(poi, candle)) return poi;
     const penetration = penetrationPct(poi, candle);
-    const newTouchCandle = poi.lastTouchCandleTs !== candleTs;
+    const newTouchCandle = !(Number.isFinite(poi.lastTouchCandleTs) && poi.lastTouchCandleTs >= candleTs);   // idem gate anti-recomptage (audit)
     const status = penetration >= 1 ? "MITIGATED" : "TOUCHED";
     return Object.freeze(Object.assign({}, poi, {
       status,

@@ -264,11 +264,17 @@
       let v = anchorCache.get(key);
       if (v !== undefined) return v;
       v = snapped;
+      // Audit 2026-07-22 : ne memoiser que si la fenetre M15 est ENTIEREMENT
+      // couverte par les bougies chargees — une ancre calculee sur une fenetre
+      // en formation (bougie courante), tronquee (replay) ou hors donnees
+      // (scroll-back a venir) restait figee fausse jusqu'au changement de TF.
+      let cacheable = false;
       try {
         if (paintData === undefined) paintData = gon.series.data() || null;   // 1 copie max par frame
         const A = paintData;
         if (A && A.length) {
           const w0 = Math.floor(ms / 900000) * 900;   // debut de la fenetre M15 (s)
+          cacheable = A[0].time <= w0 && A[A.length - 1].time >= w0 + 900;
           let lo = 0, hi = A.length - 1;
           while (hi - lo > 1) { const m = (lo + hi) >> 1; if (A[m].time < w0) lo = m; else hi = m; }
           let bestV = null, zoneFirst = null, lineFound = false;
@@ -292,8 +298,10 @@
           if (!birth && !lineFound && zoneFirst != null) v = zoneFirst;
         }
       } catch (_) {}
-      if (anchorCache.size > 4000) anchorCache.clear();
-      anchorCache.set(key, v);
+      if (cacheable) {
+        if (anchorCache.size > 4000) anchorCache.clear();
+        anchorCache.set(key, v);
+      }
       return v;
     }
 
@@ -405,6 +413,9 @@
 
     function fmtPrice(p) {
       if (!Number.isFinite(p)) return "";
+      // Sub-dollar (PEPE, DOGE, SHIB...) : 2 decimales rendaient tous les chips
+      // identiques ("0.01") — 4 chiffres significatifs preservent l'info.
+      if (p !== 0 && Math.abs(p) < 1) return p.toLocaleString("en-US", { maximumSignificantDigits: 4 });
       return Number.isInteger(p) ? p.toLocaleString("en-US") : p.toLocaleString("en-US", { maximumFractionDigits: 2 });
     }
 

@@ -89,7 +89,7 @@
     // tamisees, sans ping ni onde, hors compteurs/journal (qui restent la
     // verite du symbole affiche). Le canal vit au rythme du marche entier.
     if (panelShown() && orbs.length < 140) {
-      const w = fluxCv.width || 130, h = fluxCv.height || 300;
+      const w = fluxW || 130, h = fluxH || 300;   // px CSS (audit : les dims BITMAP ×dpr faisaient naitre les boules hors cadre en retina)
       orbs.push({ side, dim: true,
         r: Math.min(7, Math.max(3.5, (Math.log10(usd) - 3.3) * 1.7)),
         x: 12 + Math.random() * Math.max(20, w - 24),
@@ -148,10 +148,10 @@
       // (destination-out) — le canal garde le fond du panneau, pas de bloc
       // sombre encadre. Purge dure periodique : l'arrondi 8 bits fait stagner
       // les alphas 1-2/255 (voile fantome permanent sur les trajets frequents).
-      if ((fluxFrame++ & 1023) === 0) fluxCx.clearRect(0, 0, fluxW, fluxH);
+      if ((fluxFrame++ & 1023) === 0) fluxCx.clearRect(0, 0, fluxW + 1, fluxH + 1);   // +1 : couvre la demi-colonne d'arrondi DPR fractionnaire (liseré fantome)
       fluxCx.globalCompositeOperation = "destination-out";
       fluxCx.fillStyle = "rgba(0,0,0,.18)";
-      fluxCx.fillRect(0, 0, fluxW, fluxH);
+      fluxCx.fillRect(0, 0, fluxW + 1, fluxH + 1);
       fluxCx.globalCompositeOperation = "source-over";
       const now = performance.now();
       for (let i = pings.length - 1; i >= 0; i--) {
@@ -250,7 +250,7 @@
     row.innerHTML = `<i style="background:${cc}; box-shadow:0 0 6px ${cc}"></i>` +
       `<span class="amt" style="color:${cc}">${(usd / 1e6).toFixed(2)}M</span>` +
       `<span class="who">${side === LONG ? "LONGS" : "SHORTS"}</span>` +
-      `<span style="flex:1"></span><span class="who">${new Date(at).toISOString().slice(11, 16)}</span>`;
+      `<span style="flex:1"></span><span class="who">${new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>`;   // heure LOCALE (l'axe du chart l'est aussi)
     evList.prepend(row);
     while (evList.children.length > 4) evList.lastChild.remove();
     let a = 1;

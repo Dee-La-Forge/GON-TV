@@ -200,7 +200,7 @@
     row.innerHTML = `<i style="background:${hue}; box-shadow:0 0 6px ${hue}"></i>` +
       `<span style="color:${hue}; font-weight:600">${big ? "🐋 " : ""}${(usd / 1e6).toFixed(2)}M</span>` +
       `<span>${side === "buy" ? "ACHAT" : "VENTE"}</span>` +
-      `<span style="margin-left:auto; color:#6e6a58; font-size:9px">${new Date().toISOString().slice(11, 16)}</span>`;
+      `<span style="margin-left:auto; color:#6e6a58; font-size:9px">${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>`;   // heure LOCALE (audit)
     journalEl.prepend(row);
     while (journalEl.children.length > 4) journalEl.lastChild.remove();
     let a = 1; for (const c of journalEl.children) { c.style.opacity = a; a *= 0.68; }

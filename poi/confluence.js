@@ -37,6 +37,8 @@
    * fenetre visible bouge de >25 % (mini 8 s entre appels) ou toutes les 60 s. */
   let profile = new Map(), profMax = 0, pocBin = null, cvdPts = [], binSize = 10;
   let lastKlinesAt = 0, klinesBusy = false, lastFetchRange = null, lastTf = "";
+  let activePoisSrc = null, activePois = [];   // memo du filtre ACTIFS (audit) : invalide quand poi-feature reassigne pois
+  let fapiCoolUntil = 0;                       // 429/418 (audit) : plus aucune requete klines avant l'echeance
   function pickInterval(spanSec) {
     for (const [iv, sec] of [["5m", 300], ["15m", 900], ["1h", 3600], ["4h", 14400], ["1d", 86400]]) {
       if (spanSec / sec <= 700) return [iv, sec];
@@ -68,9 +70,16 @@
     lastKlinesAt = now;                          // avance MEME sur echec : pas de martelage 429
     const sym = curSymbol;
     try {
+      if (Date.now() < fapiCoolUntil) return;   // ban/limite en cours : ne pas l'entretenir (audit)
       const [iv] = pickInterval(span);
       const r = await fetch(`https://fapi.binance.com/fapi/v1/klines?symbol=${sym}&interval=${iv}` +
-        `&startTime=${from * 1000}&endTime=${to * 1000}&limit=1000`);
+        `&startTime=${from * 1000}&endTime=${to * 1000}&limit=1000`,
+        { signal: AbortSignal.timeout(10000) });   // fetch pendu = klinesBusy bloque (audit)
+      if (r.status === 429 || r.status === 418) {   // honorer Retry-After : marteler PROLONGE le ban Binance
+        const ra = Number(r.headers.get("retry-after")) || 30;
+        fapiCoolUntil = Date.now() + ra * 1000;
+        return;
+      }
       if (!r.ok) return;
       const rows = await r.json();
       if (curSymbol !== sym || !Array.isArray(rows) || rows.length < 2) return;
@@ -234,7 +243,13 @@
     }
 
     // --- murs + fantomes spoof
-    const pois = (P.pois() || []).filter((p) => p.status === "ACTIVE_UNTOUCHED");
+    // Audit 2026-07-22 : le filtre refaisait ~10k iterations + 1 allocation PAR
+    // FRAME (60 fps) pour quelques murs. Memoise sur l'identite du tableau —
+    // poi-feature REASSIGNE pois a chaque mutation (merge/flush), la reference
+    // est donc un numero de version fiable.
+    const rawPois = P.pois() || [];
+    if (rawPois !== activePoisSrc) { activePoisSrc = rawPois; activePois = rawPois.filter((p) => p.status === "ACTIVE_UNTOUCHED"); }
+    const pois = activePois;
     const drawWall = (price, usd, side, alpha, spoof) => {
       const yC = gon.priceToY(price);
       if (yC == null || !isFinite(yC)) return;

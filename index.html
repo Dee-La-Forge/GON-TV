@@ -574,7 +574,16 @@ function persistBars() {
   catch {   // quota : évince le plus ancien contexte non-courant réel puis retente UNE fois
     try {
       const keys = Object.keys(localStorage).filter(k => k.startsWith('orion-bars-') && k !== 'orion-bars-idx' && k !== key);
-      if (keys.length) { localStorage.removeItem(keys[0]); localStorage.setItem(key, payload); commitIdx(); }
+      if (keys.length) {
+        // Audit : keys[0] (ordre d'énumération) pouvait évincer le contexte le
+        // plus FRAIS — on vise le plus ancien par horodatage (corrompu = prioritaire).
+        let victim = keys[0], vt = Infinity;
+        for (const k of keys) {
+          try { const t = JSON.parse(localStorage.getItem(k)).t || 0; if (t < vt) { vt = t; victim = k; } }
+          catch { victim = k; break; }
+        }
+        localStorage.removeItem(victim); localStorage.setItem(key, payload); commitIdx();
+      }
     } catch {}
   }
 }
@@ -904,6 +913,7 @@ function applyBar(bar) {
     if (candles.length > MAX_BARS + 1000) {
       candles = candles.slice(-MAX_BARS);
       if (isSecTf()) firstTradeId = null;   // curseur de tête rasé : fetchOlderSec renvoie OLDEST (scroll gelé) sans mentir sur oldestDone
+      else oldestDone = false;              // klines : la genèse a quitté la mémoire, le scroll-back doit pouvoir la re-fetch (audit)
       setAll(candles); return;
     }
   } else if (bar.time === last.time) candles[candles.length - 1] = bar;
@@ -966,13 +976,17 @@ async function fillGap() {
       const from = candles[candles.length - 1].time * 1000;   // début du seau courant : le rollup le reconstruit ENTIER
       const k = await fetchK(`&startTime=${from}`, 1000);
       if (seq !== loadSeq || replay || !Array.isArray(k) || !k.length) break;
+      // Audit : les pushes ci-dessous désalignent indTrs si un applyBar WS tique
+      // entre deux rounds → on marque l'ATR périmé (updateInd early-return propre),
+      // le computeInd() final le recalcule d'un bloc.
+      if (!indStale) { indStale = true; indSince = Date.now(); }
       k.forEach(b => {
         const last = candles[candles.length - 1];
         if (b.time === last.time) { candles[candles.length - 1] = b; series.update(b); volSeries.update(volOf(b)); }
         else if (b.time > last.time) { candles.push(b); series.update(b); volSeries.update(volOf(b)); }
       });
       bucketVols.clear();   // le seau de tête vient d'être reconstruit depuis la source
-      if (candles.length > MAX_BARS + 1000) { candles = candles.slice(-MAX_BARS); setAll(candles); }
+      if (candles.length > MAX_BARS + 1000) { candles = candles.slice(-MAX_BARS); oldestDone = false; setAll(candles); }   // tête rasée : la genèse n'est plus en mémoire (audit)
       // page pleine = KL_PAGE/fact seaux — comparer aux SEAUX, pas aux bougies source
       if (k.length < Math.floor(KL_PAGE / (tfDef().fact || 1)) - 1) break;
     }
@@ -1105,8 +1119,12 @@ async function load(keepZoom = false, attempt = 0) {
     }
     refreshTop();
     startWs();
-    // rattrapage du trou depuis la mise en cache : APRÈS le finally (loading=false), sinon ctxBusy le tue
-    if (fromCache) setTimeout(() => { if (seq === loadSeq && !replay) (isSecTf() ? fillGapSec() : fillGap()); }, 0);
+    // rattrapage du trou depuis la mise en cache : APRÈS le finally (loading=false), sinon ctxBusy le tue.
+    // Audit : re-tente tant qu'un fillGap de l'ANCIEN contexte détient gapFilling
+    // (commutation A→B→A rapide) au lieu d'être silencieusement sauté.
+    if (fromCache) { const kick = () => { if (seq !== loadSeq || replay) return;
+      if (gapFilling) { setTimeout(kick, 250); return; }
+      (isSecTf() ? fillGapSec() : fillGap()); }; setTimeout(kick, 0); }
     // secondes : la 1re page est affichée ; on approfondit l'historique en tâche de fond (vers la gauche, sans saccade)
     if (!fromCache && isSecTf()) deepenSec(seq);
   } catch (e) { if (seq === loadSeq) { toast('Réseau : ' + e.message); retry(); } }
@@ -1193,7 +1211,7 @@ function startWs(attempt = 0) {
     clearTimeout(watchdog);
     if (muted || seq !== loadSeq) return;   // AVANT de toucher le dot : un vieux WS ne doit pas l'éteindre
     if (!pollTimer) $('dot').classList.remove('live');
-    if (!gotMsg && attempt >= 1) { startPoll(seq); return; }   // 2 connexions mortes → polling
+    if (!gotMsg && attempt >= 1) { clearInterval(staleTimer); staleTimer = null; startPoll(seq); return; }   // 2 connexions mortes → polling (audit : timer stale orphelin sinon)
     reconnectTimer = setTimeout(() => {
       if (seq === loadSeq && !pollTimer) startWs(gotMsg ? 0 : attempt + 1);
     }, 2000);
@@ -2641,19 +2659,19 @@ load();
    le service worker garde une copie locale de l'app : si GitHub repond 5xx,
    l'app demarre quand meme depuis le cache et vit sur les flux Binance.
    Network-first : les mises a jour passent comme avant (watcher 3 min inclus). */
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+if ('serviceWorker' in navigator && location.hostname.endsWith('github.io')) navigator.serviceWorker.register('sw.js').catch(() => {});   // github.io seul (audit) : en dev local, un shell caché masquerait le code frais
 </script>
 <!-- G-ON : moteur POI (modules purs testes) + feature live + rendu -->
 <script src="poi/poi-config.js?v=3"></script>
 <script src="poi/poi-score-model.js?v=1"></script>
 <script src="poi/footprint-m15.js?v=2"></script>
 <script src="poi/poi-detector.js?v=3"></script>
-<script src="poi/poi-lifecycle.js?v=5"></script>
+<script src="poi/poi-lifecycle.js?v=6"></script>
 <script src="poi/stream.js?v=1"></script>
-<script src="poi/poi-render.js?v=65"></script>
-<script src="poi/poi-feature.js?v=38"></script>
-<script src="poi/liq-flux.js?v=28"></script>
-<script src="poi/whale-sonar.js?v=27"></script>
-<script src="poi/confluence.js?v=25"></script>
+<script src="poi/poi-render.js?v=66"></script>
+<script src="poi/poi-feature.js?v=39"></script>
+<script src="poi/liq-flux.js?v=29"></script>
+<script src="poi/whale-sonar.js?v=28"></script>
+<script src="poi/confluence.js?v=26"></script>
 </body>
 </html>

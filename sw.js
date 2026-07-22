@@ -3,8 +3,21 @@
  * exactement comme avant, le watcher 3 min inclus), le cache local ne sert QUE
  * quand GitHub repond mal (5xx / licorne) ou pas du tout — l'app se recharge
  * alors depuis la derniere bonne version connue et vit sur les donnees Binance
- * (WS + REST, independantes de GitHub). Premiere visite reussie = bouclier arme. */
-const CACHE = "gon-shell-v1";
+ * (WS + REST, independantes de GitHub).
+ * NOTE armement : le SW ne controle pas la visite qui l'installe — le shell
+ * n'est complet en cache qu'a la navigation SUIVANTE (bouclier total des la
+ * 2e visite ; les fetchs tardifs de la 1re — archives — sont deja couverts).
+ * Audit 2026-07-22 :
+ * - nom de cache derive du SCOPE : /G-Bot/ et /GON-TV/ vivent sur le MEME
+ *   origin github.io -> un nom fixe partageait le cache entre les deux apps
+ *   (quota commun, purge de l'une detruisant le bouclier de l'autre) ;
+ * - purge des variantes ?v=NN au put : sans elle le cache enflait sans borne
+ *   (une entree par version deployee) ET le repli ignoreSearch servait la plus
+ *   VIEILLE version jamais encachee (ordre d'insertion) — app Frankenstein au
+ *   moment exact ou le bouclier devait servir ;
+ * - repli : match EXACT d'abord (bonne version si presente), ignoreSearch en
+ *   secours seulement. */
+const CACHE = "gon-shell-" + self.registration.scope.replace(/\W/g, "") + "-v1";
 
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (e) => e.waitUntil(self.clients.claim()));
@@ -18,19 +31,25 @@ self.addEventListener("fetch", (e) => {
 
   e.respondWith((async () => {
     const cache = await caches.open(CACHE);
+    const fallback = async () =>
+      (await cache.match(req)) || (await cache.match(req, { ignoreSearch: true }));
     try {
       const net = await fetch(req);
       if (net.status >= 500) {
         // GitHub en panne (licorne) : derniere bonne copie si on l'a
-        const hit = await cache.match(req, { ignoreSearch: true });
+        const hit = await fallback();
         if (hit) return hit;
         return net;
       }
-      if (net.ok) cache.put(req, net.clone()).catch(() => {});   // copie fraiche en reserve
+      if (net.ok) {
+        // 1 entree par chemin : purge des anciennes variantes ?v=NN puis put.
+        try { await cache.delete(req, { ignoreSearch: true }); } catch (_) {}
+        cache.put(req, net.clone()).catch(() => {});   // copie fraiche en reserve
+      }
       return net;
     } catch (err) {
       // reseau coupe : meme repli que la panne
-      const hit = await cache.match(req, { ignoreSearch: true });
+      const hit = await fallback();
       if (hit) return hit;
       throw err;
     }
