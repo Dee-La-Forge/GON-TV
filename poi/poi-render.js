@@ -44,6 +44,11 @@
   // ligne de prix permanente (les faibles restent en detail naissance->mort
   // pres de l'evenement). Reduit fortement la densite.
   const GHOST_MIN_SCORE = 90;
+  // Mort RECENT (donnees live) : un niveau qui meurt a l'ecran reste visible en
+  // pointille dans TOUTES les vues pendant cette fenetre — il ne disparait plus
+  // d'un coup. Filtre par le curseur (minScore), pas par le plancher FORT (>=80)
+  // qui ne desencombre que les morts d'ARCHIVE (nombreux).
+  const RECENT_DEAD_MS = 24 * 3600 * 1000;
   const PRICE_FONT = "600 12px Consolas, 'Roboto Mono', monospace";
   const SCORE_FONT = "700 10px Consolas, 'Roboto Mono', monospace";
   const CHIP_PAD = 6, CHIP_RULE_GAP = 5;
@@ -561,8 +566,10 @@
         for (const poi of pois) {
           if (climaxOnly && !poi.climax) continue;   // vue climax : bougies a volume dominant
           const isDead = poi.status !== "ACTIVE_UNTOUCHED";
-          if ((poi.score || 0) < (isDead ? deadMinScore : minScore)) continue;   // seuils separes morts/vivants
-          if (!showConsumed && isDead) continue;
+          // Mort recent (live) : visible partout, au seuil du curseur.
+          const recentDead = isDead && now - (poi.firstTouchTs ?? poi.statusChangedTs ?? 0) < RECENT_DEAD_MS;
+          if ((poi.score || 0) < (isDead ? (recentDead ? minScore : deadMinScore) : minScore)) continue;   // seuils separes morts/vivants
+          if (!showConsumed && isDead && !recentDead) continue;
           const lvl = refPrice(poi);
           if (!(lvl >= pLo && lvl <= pHi)) continue;
           if (vis && !intersectsView(poi, vis, now)) continue;
