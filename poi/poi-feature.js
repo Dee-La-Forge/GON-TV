@@ -182,7 +182,7 @@
     // Audit 2026-07-22 : en panne GitHub le service worker sert la DERNIERE
     // archive encachee sans aucun signal — si elle date, le trou entre son
     // cutoff et la fenetre de bootstrap (24-48 h) est invisible. On alerte.
-    if (lifecycleValidAfterTs && Date.now() - lifecycleValidAfterTs > 24 * 3600e3)
+    if (lifecycleValidAfterTs && Date.now() - lifecycleValidAfterTs > 48 * 3600e3)   // 48 h : la regen est QUOTIDIENNE, 24 h sonnait chaque matin
       console.warn("[POI] archive possiblement perimee (cache hors-panne ?)", ticker,
         new Date(lifecycleValidAfterTs).toISOString());
     return { pois: archivePois, cutoff, lifecycleValidAfterTs };
