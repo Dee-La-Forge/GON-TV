@@ -30,6 +30,12 @@
   const STALL_MS = 20000;
   const rgba = (hex, a) => { const n = parseInt(hex.slice(1), 16);
     return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${a})`; };
+  // teinte vers le blanc (pointe des barres-laser) — hex -> hex
+  const tint = (hex, f) => { const n = parseInt(hex.slice(1), 16);
+    const r = Math.round((n >> 16 & 255) + (255 - (n >> 16 & 255)) * f);
+    const g = Math.round((n >> 8 & 255) + (255 - (n >> 8 & 255)) * f);
+    const b = Math.round((n & 255) + (255 - (n & 255)) * f);
+    return "#" + ((r << 16) | (g << 8) | b).toString(16).padStart(6, "0"); };
 
   let gon = null, P = null;
   let panel, cvPanel, cxPanel, cvCvd, cxCvd, btn;
