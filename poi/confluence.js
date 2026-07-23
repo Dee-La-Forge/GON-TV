@@ -42,6 +42,7 @@
    * profil = volume distribue sur le range de chaque bougie. Refetch quand la
    * fenetre visible bouge de >25 % (mini 8 s entre appels) ou toutes les 60 s. */
   let profile = new Map(), profMax = 0, pocBin = null, cvdPts = [], binSize = 10;
+  let vaLoBin = null, vaHiBin = null;   // Value Area 70 % (calculee a la reconstruction)
   let lastKlinesAt = 0, klinesBusy = false, lastFetchRange = null, lastTf = "";
   // Memo du filtre ACTIFS (audit) : invalide sur reassignation de pois OU apres
   // 1 s — poi-feature MUTE AUSSI EN PLACE (bootstrap pois[pos]=/push, revue) et
@@ -128,7 +129,24 @@
       }
       profile = prof; cvdPts = pts;
       profMax = 0; pocBin = null;
-      for (const [b, e] of profile) if (e.vol > profMax) { profMax = e.vol; pocBin = b; }
+      let totalVol = 0;
+      for (const [b, e] of profile) { totalVol += e.vol; if (e.vol > profMax) { profMax = e.vol; pocBin = b; } }
+      // VALUE AREA 70 % : expansion bilatérale depuis le POC vers le voisin le
+      // plus volumineux — calculée ICI (une fois par refetch), jamais par frame.
+      vaLoBin = vaHiBin = null;
+      if (pocBin != null && totalVol > 0) {
+        const bins = [...profile.keys()].sort((x, y) => x - y);
+        let lo = bins.indexOf(pocBin), hi = lo;
+        let covered = profile.get(pocBin).vol;
+        const target = totalVol * 0.7;
+        while (covered < target && (lo > 0 || hi < bins.length - 1)) {
+          const vLo = lo > 0 ? profile.get(bins[lo - 1]).vol : -1;
+          const vHi = hi < bins.length - 1 ? profile.get(bins[hi + 1]).vol : -1;
+          if (vHi >= vLo) { hi += 1; covered += profile.get(bins[hi]).vol; }
+          else { lo -= 1; covered += profile.get(bins[lo]).vol; }
+        }
+        vaLoBin = bins[lo]; vaHiBin = bins[hi];
+      }
     } catch (_) {} finally { klinesBusy = false; }
   }
 
@@ -207,6 +225,45 @@
     const dy = chartTop - host.top;
     const innerR = w - 12, maxW = w - 70;
 
+    // --- SCANLINE : balayage lumineux lent (fond, ~7 s par traversee)
+    {
+      const sy = ((now * 0.045) % (h + 90)) - 45;
+      const g = cxPanel.createLinearGradient(0, sy - 26, 0, sy + 26);
+      g.addColorStop(0, "rgba(180,200,255,0)");
+      g.addColorStop(0.5, "rgba(180,200,255,.045)");
+      g.addColorStop(1, "rgba(180,200,255,0)");
+      cxPanel.fillStyle = g;
+      cxPanel.fillRect(0, sy - 26, w, 52);
+    }
+
+    // --- RAIL : axe vertical dore d'ou emanent les barres du profil
+    cxPanel.save();
+    cxPanel.shadowColor = GOLD; cxPanel.shadowBlur = 4;
+    cxPanel.strokeStyle = "rgba(217,182,77,.28)"; cxPanel.lineWidth = 1;
+    cxPanel.beginPath(); cxPanel.moveTo(innerR + 0.5, 30); cxPanel.lineTo(innerR + 0.5, h - 8); cxPanel.stroke();
+    cxPanel.restore();
+
+    // --- VALUE AREA 70 % : voile + bornes VAH/VAL en pointilles
+    if (vaLoBin != null && vaHiBin != null) {
+      const yVaTop = gon.priceToY((vaHiBin + 1) * binSize), yVaBot = gon.priceToY(vaLoBin * binSize);
+      if (yVaTop != null && yVaBot != null && isFinite(yVaTop) && isFinite(yVaBot)) {
+        const t = Math.min(yVaTop, yVaBot) + dy, b = Math.max(yVaTop, yVaBot) + dy;
+        if (b > 30 && t < h - 8) {
+          cxPanel.fillStyle = "rgba(217,182,77,.05)";
+          cxPanel.fillRect(6, Math.max(30, t), w - 18, Math.min(h - 8, b) - Math.max(30, t));
+          cxPanel.setLineDash([3, 4]);
+          cxPanel.strokeStyle = "rgba(217,182,77,.30)"; cxPanel.lineWidth = 1;
+          for (const [yy, lbl] of [[t, "VAH"], [b, "VAL"]]) {
+            if (yy < 30 || yy > h - 8) continue;
+            cxPanel.beginPath(); cxPanel.moveTo(6, Math.round(yy) + 0.5); cxPanel.lineTo(innerR, Math.round(yy) + 0.5); cxPanel.stroke();
+            cxPanel.fillStyle = "rgba(217,182,77,.55)"; cxPanel.font = "600 7px Segoe UI";
+            cxPanel.fillText(lbl, 7, yy + (lbl === "VAH" ? -3 : 9));
+          }
+          cxPanel.setLineDash([]);
+        }
+      }
+    }
+
     // --- profil (geometrie PAR BARRE depuis les bords exacts du bin :
     // stable sous n'importe quel rescale de la barre des prix — plus aucun
     // fallback global qui faisait sauter toutes les barres quand le POC
@@ -221,7 +278,7 @@
         if (yTop + hh < 30 || yTop > h - 8) continue;
         const wBar = e.vol / profMax * maxW;
         const buyFrac = e.vol > 0 ? Math.max(0, Math.min(1, e.buy / e.vol)) : 0.5;   // 0/0 -> NaN sinon
-        bars.push({ b, yTop, hh, wBar, wBuy: wBar * buyFrac });
+        bars.push({ b, yTop, hh, wBar, wBuy: wBar * buyFrac, buyFrac });
       }
       // glow UNE fois par passe de couleur (pas par barre) et seulement si les
       // lignes sont assez hautes. Base sur la MEDIANE des hauteurs (stable), pas
@@ -231,25 +288,47 @@
       const hMed = bars.length ? bars.map((bb) => bb.hh).sort((a, b) => a - b)[bars.length >> 1] : 0;
       const glow = hMed >= 3;
       cxPanel.save();
+      // BARRES-LASER : base bicolore un peu tamisee + POINTE lumineuse teintee
+      // blanc a l'extremite (la ou finit le volume) — lecture immediate de la
+      // portee de chaque ligne, style faisceau.
       if (glow) { cxPanel.shadowColor = BUY; cxPanel.shadowBlur = 5; }
       for (const bar of bars) {
-        cxPanel.fillStyle = rgba(BUY, bar.b === pocBin ? 0.9 : 0.5);
+        cxPanel.fillStyle = rgba(BUY, bar.b === pocBin ? 0.9 : 0.42);
         cxPanel.fillRect(innerR - bar.wBar, bar.yTop, bar.wBuy, bar.hh);
       }
       if (glow) cxPanel.shadowColor = SELL;
       for (const bar of bars) {
-        cxPanel.fillStyle = rgba(SELL, bar.b === pocBin ? 0.9 : 0.5);
+        cxPanel.fillStyle = rgba(SELL, bar.b === pocBin ? 0.9 : 0.42);
         cxPanel.fillRect(innerR - bar.wBar + bar.wBuy, bar.yTop, bar.wBar - bar.wBuy, bar.hh);
+      }
+      // pointes (une passe, sans glow — le point net au bout du faisceau)
+      cxPanel.shadowBlur = 0;
+      for (const bar of bars) {
+        if (bar.wBar < 6) continue;
+        const hue = bar.buyFrac >= 0.5 ? BUY : SELL;
+        cxPanel.fillStyle = rgba(tint(hue, 0.65), bar.b === pocBin ? 0.95 : 0.65);
+        cxPanel.fillRect(innerR - bar.wBar, bar.yTop, 1.6, bar.hh);
       }
       cxPanel.restore();
       const poc = bars.find((bar) => bar.b === pocBin);
       if (poc) {
         const pulse = 0.75 + 0.25 * Math.sin(now * 0.004);
-        cxPanel.save(); cxPanel.shadowColor = GOLD; cxPanel.shadowBlur = 8 * pulse;
+        const yMid = Math.round(poc.yTop + poc.hh / 2) + 0.5;
+        // ligne POC pleine largeur (sous la barre) + contour pulse + chip
+        cxPanel.save();
+        cxPanel.strokeStyle = `rgba(217,182,77,${0.20 + 0.10 * pulse})`; cxPanel.lineWidth = 1;
+        cxPanel.beginPath(); cxPanel.moveTo(6, yMid); cxPanel.lineTo(innerR, yMid); cxPanel.stroke();
+        cxPanel.shadowColor = GOLD; cxPanel.shadowBlur = 8 * pulse;
         cxPanel.strokeStyle = `rgba(255,255,255,${0.8 * pulse})`; cxPanel.lineWidth = 0.7;
-        cxPanel.strokeRect(innerR - poc.wBar, poc.yTop, poc.wBar, poc.hh); cxPanel.restore();
+        cxPanel.strokeRect(innerR - poc.wBar, poc.yTop, poc.wBar, poc.hh);
+        cxPanel.restore();
+        const lx = innerR - poc.wBar - 30;
+        cxPanel.fillStyle = "rgba(10,10,8,.85)";
+        cxPanel.fillRect(lx - 3, poc.yTop + poc.hh / 2 - 6.5, 27, 13);
+        cxPanel.strokeStyle = "rgba(217,182,77,.45)"; cxPanel.lineWidth = 0.6;
+        cxPanel.strokeRect(lx - 3, poc.yTop + poc.hh / 2 - 6.5, 27, 13);
         cxPanel.fillStyle = GOLD; cxPanel.font = "600 9px Segoe UI";
-        cxPanel.fillText("POC", innerR - poc.wBar - 26, poc.yTop + poc.hh / 2 + 3);
+        cxPanel.fillText("POC", lx, poc.yTop + poc.hh / 2 + 3);
       }
     }
 
@@ -354,15 +433,20 @@
     cxCvd.strokeStyle = "rgba(110,106,88,.22)"; cxCvd.lineWidth = 1;
     cxCvd.beginPath(); cxCvd.moveTo(0, y0); cxCvd.lineTo(w - 58, y0); cxCvd.stroke();
     cxCvd.setLineDash([]);
+    // trace LASER deux passes : halo large doux puis coeur net et brillant
     for (let i = 1; i < pts.length; i++) {
       const hue = pts[i].cvd >= pts[i - 1].cvd ? BUY : SELL;
-      cxCvd.shadowColor = hue; cxCvd.shadowBlur = 2;
-      cxCvd.strokeStyle = rgba(hue, 0.45); cxCvd.lineWidth = 1;
+      cxCvd.shadowColor = hue; cxCvd.shadowBlur = 6;
+      cxCvd.strokeStyle = rgba(hue, 0.18); cxCvd.lineWidth = 2.4;
+      cxCvd.beginPath(); cxCvd.moveTo(pts[i - 1].x, yC(pts[i - 1].cvd));
+      cxCvd.lineTo(pts[i].x, yC(pts[i].cvd)); cxCvd.stroke();
+      cxCvd.shadowBlur = 2;
+      cxCvd.strokeStyle = rgba(hue, 0.75); cxCvd.lineWidth = 1;
       cxCvd.beginPath(); cxCvd.moveTo(pts[i - 1].x, yC(pts[i - 1].cvd));
       cxCvd.lineTo(pts[i].x, yC(pts[i].cvd)); cxCvd.stroke();
     }
     cxCvd.shadowBlur = 0;
-    cxCvd.fillStyle = "rgba(110,106,88,.45)"; cxCvd.font = "8px Segoe UI";
+    cxCvd.fillStyle = "rgba(217,182,77,.50)"; cxCvd.font = "600 8px Segoe UI";
     const spanH = lastFetchRange ? Math.round((lastFetchRange.to - lastFetchRange.from) / 3600) : 0;
     cxCvd.fillText(spanH >= 48 ? `CVD ${Math.round(spanH / 24)}j` : `CVD ${spanH}h`, 8, zTop + 11);
     cxCvd.restore();
@@ -429,11 +513,22 @@
     const css = document.createElement("style");
     css.textContent = `
       #gonConflPanel { flex:0 0 ${PANEL_W}px; position:relative; margin:0 8px 8px 0; padding-top:8px;
-        pointer-events:auto; background:rgba(10,10,8,.85);
+        pointer-events:auto;
+        background:linear-gradient(180deg, rgba(15,14,10,.92), rgba(8,8,6,.85));
         border:1px solid rgba(217,182,77,.14); border-radius:6px;
         font-family:"Segoe UI",system-ui,sans-serif; }
-      #gonConflPanel .hd { font-size:9px; letter-spacing:3px; color:#d9b64d; text-align:center;
-        padding-bottom:6px; border-bottom:1px solid rgba(217,182,77,.10); }
+      /* coins lumineux (brackets futuristes) */
+      #gonConflPanel::before, #gonConflPanel::after { content:""; position:absolute; top:-1px;
+        width:14px; height:14px; border:1px solid rgba(217,182,77,.55); pointer-events:none; }
+      #gonConflPanel::before { left:-1px; border-right:none; border-bottom:none;
+        border-top-left-radius:6px; }
+      #gonConflPanel::after { right:-1px; border-left:none; border-bottom:none;
+        border-top-right-radius:6px; }
+      #gonConflPanel .hd { position:relative; font-size:9px; letter-spacing:3px; color:#d9b64d;
+        text-align:center; padding-bottom:6px; text-shadow:0 0 10px rgba(217,182,77,.35); }
+      #gonConflPanel .hd::after { content:""; position:absolute; left:8%; right:8%; bottom:0;
+        height:1px; background:linear-gradient(90deg, transparent,
+        rgba(217,182,77,.55), transparent); }
       #gonConflCv { position:absolute; left:0; right:0; top:26px; bottom:0; width:100%;
         height:calc(100% - 26px); }
       #gonConflCvd { position:absolute; inset:0; pointer-events:none; z-index:6; }
