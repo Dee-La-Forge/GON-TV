@@ -14,6 +14,17 @@ un corpus qui colle deux régimes d'émission incompatibles, et un score juste e
 ORDRE mais non stationnaire en NIVEAU — le seuil FORT≥80 ne désigne pas la même
 population selon l'époque.
 
+## ⚖️ DOCTRINE D'USAGE DU SCORE (D3 — gravée, ratifiée par Meddy le 2026-07-23)
+
+> **Le score TRIE, il n'autorise pas.**
+>
+> Il classe les niveaux par probabilité de RÉACTION au retest (les ≥80 réagissent à
+> 63-64 % contre 54 % de base — vérifié sur 2025 ET 2026). Il ne prédit NI le gain
+> d'un trade (AUC 0,518 ≈ hasard) NI la survie d'un niveau (T vs I). Il sert à choisir
+> QUELS niveaux regarder, jamais à décider DE trader — la décision reste la lecture
+> (biais, structure, contexte). Ne jamais présenter un winrate comme une propriété du
+> score. Gravé dans l'UI : tooltip du slider de score (poi-feature v46).
+
 ## 🔴 Prouvé
 
 1. **« 1 POI par bougie M15 » est un choix de conception, pas un bug** — flag
@@ -111,5 +122,7 @@ respectée, candidat archivé, v2 conservé à raison).
   trimestre sur 2025-2026 (contre 13-16,5 % errant en brut), ordre local 99,9 %.
 - **D4 (commit 85148ca)** : clés mortes documentées, parity-report dé-gitignoré,
   libellés « parité prouvée » corrigés partout, note regen ne clobbe plus D1.
-- **Restent ouverts** : D3 (graver la doctrine d'usage du score) ; 🟠 doji→long,
-  gate directionnelle fragile, fpTimeShare mal nommé, win jamais jugé sur les alts.
+- **D3 (commit qui suit)** : doctrine gravée en tête de ce doc + tooltip du slider de
+  score dans l'app (poi-feature v46) — « Le score trie, il n'autorise pas ».
+- **Restent ouverts** : 🟠 doji→long, gate directionnelle fragile, fpTimeShare mal
+  nommé, win jamais jugé sur les alts.

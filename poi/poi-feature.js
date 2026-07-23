@@ -871,11 +871,18 @@
     // Picto entonnoir : filtre par score minimum (meme trait que l'oeil)
     const sliderLabel = document.createElement("span"); sliderLabel.className = "gp-ico";
     sliderLabel.innerHTML = '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h12L9.5 8.5V13l-3-1.5V8.5L2 3z"/></svg>';
-    sliderLabel.title = "Filtre : score d'importance minimum";
+    // D3 (AUDIT_SCORING_2026-07-23) : doctrine d'usage gravee dans l'UI —
+    // le score TRIE (les >=80 reagissent mieux au retest : 64 % vs 54 %),
+    // il n'AUTORISE pas (aucun pouvoir sur le gain d'un trade, ~hasard).
+    const D3_TIP = "Le score TRIE, il n'autorise pas.\n"
+      + "Il classe les niveaux par probabilite de REACTION au retest\n"
+      + "(percentile glissant 90 j : >=80 = top 20 % du regime en cours).\n"
+      + "Il ne predit PAS le gain d'un trade - la decision reste ta lecture.";
+    sliderLabel.title = "Filtre : score minimum affiche\n\n" + D3_TIP;
     const slider = document.createElement("input");
     slider.type = "range"; slider.min = "0"; slider.max = "100"; slider.step = "1";
     slider.value = String(minScore); slider.className = "gon-poi-range";
-    slider.title = "Score d'importance minimum affiche";
+    slider.title = "Score minimum affiche\n\n" + D3_TIP;
     const sliderVal = document.createElement("span"); sliderVal.className = "gp-val";
     group.append(toggle, bolt, sep, sliderLabel, slider, sliderVal);
 
