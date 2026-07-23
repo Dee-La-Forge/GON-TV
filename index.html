@@ -2945,6 +2945,32 @@ load();
    l'app demarre quand meme depuis le cache et vit sur les flux Binance.
    Network-first : les mises a jour passent comme avant (watcher 3 min inclus). */
 if ('serviceWorker' in navigator && location.hostname.endsWith('github.io')) navigator.serviceWorker.register('sw.js').catch(() => {});   // github.io seul (audit) : en dev local, un shell caché masquerait le code frais
+
+/* VEILLE DE VERSION (écrans distants sans clavier) : toutes les 5 min, on
+   compare la signature des modules (?v=NN) du HTML servi avec celle de la
+   page en cours. Si un nouveau déploiement est en ligne, la page se recharge
+   TOUTE SEULE — mais seulement après 2 min sans interaction, pour ne jamais
+   couper quelqu'un en pleine manipulation. */
+(() => {
+  if (!location.hostname.endsWith('github.io')) return;
+  const sig = (html) => (html.match(/\.js\?v=\d+/g) || []).sort().join('|');
+  const current = sig(document.documentElement.outerHTML);
+  if (!current) return;
+  let lastInput = Date.now();
+  for (const ev of ['pointerdown', 'keydown', 'wheel', 'touchstart'])
+    window.addEventListener(ev, () => { lastInput = Date.now(); }, { passive: true, capture: true });
+  let stale = false;
+  setInterval(async () => {
+    try {
+      if (!stale) {
+        const res = await fetch(location.pathname + '?vchk=' + Date.now(), { cache: 'no-store' });
+        if (!res.ok) return;
+        stale = sig(await res.text()) !== current;
+      }
+      if (stale && Date.now() - lastInput > 120000) location.reload();
+    } catch (_) { /* réseau : on retentera */ }
+  }, 5 * 60 * 1000);
+})();
 </script>
 <!-- G-ON : moteur POI (modules purs testes) + feature live + rendu -->
 <script src="poi/poi-config.js?v=4"></script>
