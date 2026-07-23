@@ -679,7 +679,7 @@
       <div id="gonLiqChan"><canvas></canvas></div>
       <div id="gonLiqJournal"><div class="t">JOURNAL</div><div id="gonLiqEvList"></div></div>
       <div id="gonLiqVideo">
-        <video src="laforge.mp4" autoplay muted loop playsinline></video>
+        <video src="laforge.mp4" autoplay muted playsinline></video>
         <input type="range" id="gonLiqVol" min="0" max="100" value="70" title="Volume">
         <button id="gonLiqSnd" title="Activer / couper le son">&#9834;</button>
       </div>
@@ -723,6 +723,15 @@
     const vol = panel.querySelector("#gonLiqVol");
     try { vol.value = localStorage.getItem("gon.liq.vol") || "70"; } catch (_) {}
     vid.volume = Number(vol.value) / 100;
+    // PLAYLIST : les videos s'enchainent puis rebouclent (l'attribut loop a
+    // ete retire — c'est le handler ended qui fait tourner la liste).
+    const PLAYLIST = ["laforge.mp4", "montage_kenzo7_gon_v2.mp4"];
+    let vidIdx = 0;
+    vid.addEventListener("ended", () => {
+      vidIdx = (vidIdx + 1) % PLAYLIST.length;
+      vid.src = PLAYLIST[vidIdx];
+      vid.play().catch(() => {});
+    });
     // SON PAR DEFAUT : tentative directe (marche si Chrome autorise le son
     // pour ce site — Parametres du site > Son > Autoriser) ; sinon Chrome
     // bloque l'autoplay sonore, et on l'active au PREMIER geste utilisateur
