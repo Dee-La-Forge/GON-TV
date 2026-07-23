@@ -99,3 +99,17 @@ respectée, candidat archivé, v2 conservé à raison).
   mortes ; unifier les sentinelles à l'écriture future ; dé-gitignorer parity-report.json ;
   corriger les notes « parité prouvée » → « parité conditionnelle (zones/scores), taux
   d'émission par conception ».
+
+## Appliqué (même jour)
+
+- **D1 (commit 4837ebd)** : fenêtre canonique 2026-01→07 régénérée au détecteur JS
+  (9 399 → 18 874 lignes) — 566 jours à exactement 96 POI/jour, plus de couture ;
+  verdicts win étendus à toute l'archive (28 266) ; sentinelles retestTs=0 disparues.
+- **D2 (commit 85148ca)** : score affiché = percentile GLISSANT 90 j (chargeur
+  poi-feature v45, histogramme 101 cases O(n), live calibré par la fenêtre de queue,
+  brut dans scoreRaw, archive disque inchangée). Mesuré : FORT≥80 = 18,8-22,1 % par
+  trimestre sur 2025-2026 (contre 13-16,5 % errant en brut), ordre local 99,9 %.
+- **D4 (commit 85148ca)** : clés mortes documentées, parity-report dé-gitignoré,
+  libellés « parité prouvée » corrigés partout, note regen ne clobbe plus D1.
+- **Restent ouverts** : D3 (graver la doctrine d'usage du score) ; 🟠 doji→long,
+  gate directionnelle fragile, fpTimeShare mal nommé, win jamais jugé sur les alts.
