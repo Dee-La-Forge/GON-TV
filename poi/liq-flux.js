@@ -34,7 +34,7 @@
   // Teinte vers le blanc (coeur lumineux) — melange arithmetique, pas un degrade.
   const tint = (c, f) => [Math.round(c[0] + (255 - c[0]) * f), Math.round(c[1] + (255 - c[1]) * f), Math.round(c[2] + (255 - c[2]) * f)];
 
-  /* ---------- moteur organique (V2 Meddy) ---------- */
+  /* ---------- moteur organique (V2 Meddy — Partie 2) ---------- */
   function noise(x, y, t) {
     return Math.sin(x * 0.013 + t * 0.0017) *
            Math.cos(y * 0.017 - t * 0.0013);
@@ -44,6 +44,29 @@
     return Math.max(a, Math.min(b, v));
   }
 
+  // Champ de turbulence GLOBAL : deux octaves de bruit sinusoidal partagees
+  // par tous les orbes + rafale lente commune (gust) — le canal "respire"
+  // d'un seul souffle au lieu de N sinusoides independantes.
+  function flowField(x, y, t) {
+    const gust = 0.6 + 0.4 * Math.sin(t * 0.00037);
+    const a = noise(x, y, t);
+    const b = Math.sin(y * 0.021 + t * 0.0009) * Math.cos(x * 0.011 + t * 0.0011);
+    return { ax: (a * 0.03 + b * 0.015) * gust, ay: b * 0.01 * gust };
+  }
+
+  // POOLING : orbes, particules et points de queue sont recycles — zero
+  // allocation en regime etabli (le point de queue etait le pire offenseur :
+  // 1 objet/orbe/frame). Pools bornes (pression memoire nulle).
+  const orbPool = [], particlePool = [], trailPool = [];
+  const takePt = (x, y) => { const p = trailPool.pop() || { x: 0, y: 0 }; p.x = x; p.y = y; return p; };
+  const freePt = (p) => { if (trailPool.length < 2000) trailPool.push(p); };
+  function freeOrb(o) {
+    for (let i = 0; i < o.trail.length; i++) freePt(o.trail[i]);
+    o.trail.length = 0;
+    if (orbPool.length < 140) orbPool.push(o);
+  }
+  const freeParticle = (p) => { if (particlePool.length < 240) particlePool.push(p); };
+
   function createOrb(side, usd, dim = false) {
     const r = dim
       ? Math.min(7, Math.max(3.5, (Math.log10(usd) - 3.3) * 1.7))
@@ -51,32 +74,25 @@
 
     const w = fluxW || 130;
     const h = fluxH || 300;
-    const seed = Math.random() * 1000;
 
-    const orb = {
-      side,
-      dim,
-      r,
-      baseR: r,
-      x: 12 + Math.random() * Math.max(20, w - 24),
-      y: side === LONG ? -r : h + r,
-
-      vx: (Math.random() - 0.5) * 0.6,
-      vy: (0.9 + Math.random() * 1.4) * (side === LONG ? 1 : -1),
-
-      ax: 0,
-      ay: 0,
-
-      seed,
-      life: 0,
-      fade: 1,
-
-      pulse: Math.random() * 6.28,
-      amp: 2 + Math.random() * 4,
-
-      trail: [],
-      maxTrail: Math.round(12 + r * 1.2)
-    };
+    const orb = orbPool.pop() || { trail: [] };
+    orb.side = side;
+    orb.dim = dim;
+    orb.r = r;
+    orb.baseR = r;
+    orb.x = 12 + Math.random() * Math.max(20, w - 24);
+    orb.y = side === LONG ? -r : h + r;
+    orb.vx = (Math.random() - 0.5) * 0.6;
+    orb.vy = (0.9 + Math.random() * 1.4) * (side === LONG ? 1 : -1);
+    orb.ax = 0;
+    orb.ay = 0;
+    orb.seed = Math.random() * 1000;
+    orb.life = 0;
+    orb.fade = 1;
+    orb.dying = false;
+    orb.pulse = Math.random() * 6.28;
+    orb.amp = 2 + Math.random() * 4;
+    orb.maxTrail = Math.round(12 + r * 1.2);
 
     orbs.push(orb);
 
@@ -85,14 +101,14 @@
       if (usd > 5e6) {
         const count = Math.min(14, Math.round(usd / 5e6));
         for (let i = 0; i < count; i++) {
-          particles.push({
-            x: orb.x,
-            y: orb.y,
-            vx: (Math.random() - 0.5) * 3,
-            vy: (Math.random() - 0.5) * 3,
-            life: 1,
-            side
-          });
+          const p = particlePool.pop() || {};
+          p.x = orb.x;
+          p.y = orb.y;
+          p.vx = (Math.random() - 0.5) * 3;
+          p.vy = (Math.random() - 0.5) * 3;
+          p.life = 1;
+          p.side = side;
+          particles.push(p);
         }
       }
 
@@ -242,18 +258,58 @@
         fluxCx.arc(p.x, p.y, 2 + ease * (10 + rr * 1.4), 0, Math.PI * 2);
         fluxCx.stroke();
       }
-      /* ---------- orbs organiques (V2 Meddy) ---------- */
+      /* ---------- interactions : fusion + collisions douces (V2 P2) ------ */
+      // O(n^2) borne (<=140 orbes) avec rejet rapide par boite englobante.
+      for (let i = 0; i < orbs.length; i++) {
+        const a = orbs[i];
+        if (a.dying) continue;
+        for (let j = i + 1; j < orbs.length; j++) {
+          const b = orbs[j];
+          if (b.dying) continue;
+          const dx = b.x - a.x, dy = b.y - a.y;
+          const rs = (a.r + b.r) * 0.9;
+          if (dx > rs || dx < -rs || dy > rs || dy < -rs) continue;
+          const d2 = dx * dx + dy * dy;
+          if (d2 >= rs * rs || d2 === 0) continue;
+          const d = Math.sqrt(d2);
+          if (a.side === b.side && !a.dim && !b.dim && d < Math.max(a.r, b.r) * 0.6) {
+            // FUSION LUMINEUSE : le gros absorbe le petit — volume conserve
+            // (cbrt de la somme des cubes), plafond 44 ; le petit s'eteint
+            // en fondu, sa queue persiste un instant (rendu organique).
+            const big = a.baseR >= b.baseR ? a : b;
+            const small = big === a ? b : a;
+            big.baseR = Math.min(44, Math.cbrt(big.baseR ** 3 + small.baseR ** 3));
+            big.maxTrail = Math.round(12 + big.baseR * 1.2);
+            small.dying = true;
+            continue;
+          }
+          // COLLISION DOUCE : repulsion proportionnelle au recouvrement —
+          // les orbes se froissent sans jamais rebondir durement.
+          const push = (1 - d / rs) * 0.06;
+          const nx = dx / d, ny = dy / d;
+          a.ax -= nx * push; a.ay -= ny * push;
+          b.ax += nx * push; b.ay += ny * push;
+        }
+      }
+
+      /* ---------- orbs organiques (V2 — fluxLoop final) ---------- */
+      // Etat canvas pose UNE fois pour orbes + particules (fini le
+      // save/restore par orbe : ~140 paires economisees par frame).
+      fluxCx.save();
+      fluxCx.globalCompositeOperation = "lighter";
+      fluxCx.lineCap = "round";
+      fluxCx.lineJoin = "round";
       for (let i = orbs.length - 1; i >= 0; i--) {
         const o = orbs[i];
 
-        // apparition progressive
+        // apparition progressive / agonie (fusion absorbee, sortie de canal)
         o.life = Math.min(1, o.life + 0.05);
+        if (o.dying) o.fade -= 0.05;
 
-        // turbulence organique
-        const n = noise(o.x, o.y, now + o.seed * 100);
-
-        o.ax += n * 0.03;
-        o.ay += Math.sin(now * 0.001 + o.seed) * 0.004;
+        // turbulence : champ GLOBAL partage + derive lente propre (seed)
+        const f = flowField(o.x, o.y, now + o.seed * 100);
+        o.ax += f.ax;
+        o.ay += f.ay + Math.sin(now * 0.001 + o.seed) * 0.004;
 
         // attraction legere vers le centre
         const center = fluxW * 0.5;
@@ -262,31 +318,26 @@
         // inertie
         o.vx += o.ax;
         o.vy += o.ay;
-
         o.vx *= 0.97;
         o.vy *= 0.995;
-
         o.x += o.vx;
         o.y += o.vy;
-
         o.ax = 0;
         o.ay = 0;
 
-        // pulsation
+        // pulsation (lissage du rayon vers baseR — la fusion gonfle en douceur)
+        o.r += (o.baseR - o.r) * 0.15;
         const pulse =
           1 +
           Math.sin(now * 0.003 + o.seed) * 0.08 +
           Math.sin(now * 0.007 + o.seed * 3) * 0.04;
+        const radius = o.r * pulse;
 
-        const radius = o.baseR * pulse;
+        // queue physique (points recycles par le pool)
+        o.trail.unshift(takePt(o.x, o.y));
+        if (o.trail.length > o.maxTrail) freePt(o.trail.pop());
 
-        // queue physique
-        o.trail.unshift({ x: o.x, y: o.y });
-        if (o.trail.length > o.maxTrail) {
-          o.trail.pop();
-        }
-
-        // disparition progressive
+        // disparition progressive en sortie de canal
         if (
           (o.side === LONG && o.y - radius > fluxH - 20) ||
           (o.side === SHORT && o.y + radius < 20)
@@ -296,14 +347,12 @@
 
         if (o.fade <= 0) {
           orbs.splice(i, 1);
+          freeOrb(o);
           continue;
         }
 
         const c = COLOR[o.side];
         const alpha = o.life * o.fade;
-
-        fluxCx.save();
-        fluxCx.globalCompositeOperation = "lighter";
 
         /* ----- queue de comete ----- */
         for (let t = o.trail.length - 1; t > 0; t--) {
@@ -313,8 +362,6 @@
           const a = alpha * k * k * 0.45;
           fluxCx.strokeStyle = rgba(c, a);
           fluxCx.lineWidth = Math.max(0.5, radius * k * 0.7);
-          fluxCx.lineCap = "round";
-          fluxCx.lineJoin = "round";
           fluxCx.beginPath();
           fluxCx.moveTo(p1.x, p1.y);
           fluxCx.lineTo(p2.x, p2.y);
@@ -364,39 +411,33 @@
           );
           fluxCx.fill();
         }
-
-        fluxCx.restore();
       }
 
-      /* ---------- particules satellites ---------- */
+      /* ---------- particules satellites (meme etat canvas) ---------- */
+      fluxCx.shadowBlur = 6;
       for (let i = particles.length - 1; i >= 0; i--) {
         const p = particles[i];
 
         p.x += p.vx;
         p.y += p.vy;
-
         p.vx *= 0.96;
         p.vy *= 0.96;
-
         p.life -= 0.03;
 
         if (p.life <= 0) {
           particles.splice(i, 1);
+          freeParticle(p);
           continue;
         }
 
         const c = COLOR[p.side];
-
-        fluxCx.save();
-        fluxCx.globalCompositeOperation = "lighter";
         fluxCx.shadowColor = rgba(c, 1);
-        fluxCx.shadowBlur = 6;
         fluxCx.fillStyle = rgba(c, p.life * 0.5);
         fluxCx.beginPath();
         fluxCx.arc(p.x, p.y, 1.8 + p.life * 2, 0, Math.PI * 2);
         fluxCx.fill();
-        fluxCx.restore();
       }
+      fluxCx.restore();
 
       // onde d'horizon : bitmap DPR (5 px CSS de haut), dessin en px CSS
       const wrect = waveCv.parentElement.getBoundingClientRect();
