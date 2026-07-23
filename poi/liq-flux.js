@@ -92,6 +92,7 @@
     orb.life = 0;
     orb.fade = 1;
     orb.dying = false;
+    orb.sparkAt = 0;
     orb.pulse = Math.random() * 6.28;
     orb.amp = 2 + Math.random() * 4;
     orb.maxTrail = Math.round(12 + r * 1.2);
@@ -285,12 +286,33 @@
             small.dying = true;
             continue;
           }
-          // COLLISION DOUCE : repulsion proportionnelle au recouvrement —
-          // les orbes se froissent sans jamais rebondir durement.
-          const push = (1 - d / rs) * 0.06;
+          // COLLISION : deviation VISIBLE a l'echelle meteore (0,06 etait
+          // calibre pour des meduses lentes — les meteores se traversaient).
+          const push = (1 - d / rs) * 0.22;
           const nx = dx / d, ny = dy / d;
           a.ax -= nx * push; a.ay -= ny * push;
           b.ax += nx * push; b.ay += ny * push;
+          // ETINCELLES D'IMPACT : choc franc (recouvrement profond + vitesse
+          // relative) -> salve de particules au point de contact, avec
+          // refroidissement par orbe (sinon une paire encastree crache une
+          // tempete a 60 fps).
+          const rvx = b.vx - a.vx, rvy = b.vy - a.vy;
+          const impact = Math.sqrt(rvx * rvx + rvy * rvy);
+          if (impact > 2.2 && d < rs * 0.55 && particles.length < 200 &&
+              now - (a.sparkAt || 0) > 350 && now - (b.sparkAt || 0) > 350) {
+            a.sparkAt = now; b.sparkAt = now;
+            const cx2 = (a.x + b.x) / 2, cy2 = (a.y + b.y) / 2;
+            const nSp = Math.min(6, 2 + Math.round(impact));
+            for (let k = 0; k < nSp; k++) {
+              const q = particlePool.pop() || {};
+              q.x = cx2; q.y = cy2;
+              q.vx = (Math.random() - 0.5) * (2 + impact * 0.8);
+              q.vy = (Math.random() - 0.5) * (2 + impact * 0.8);
+              q.life = 0.7;
+              q.side = Math.random() < 0.5 ? a.side : b.side;
+              particles.push(q);
+            }
+          }
         }
       }
 
