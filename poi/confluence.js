@@ -322,7 +322,7 @@
         cxPanel.strokeStyle = `rgba(255,255,255,${0.8 * pulse})`; cxPanel.lineWidth = 0.7;
         cxPanel.strokeRect(innerR - poc.wBar, poc.yTop, poc.wBar, poc.hh);
         cxPanel.restore();
-        const lx = innerR - poc.wBar - 30;
+        const lx = Math.max(7, innerR - poc.wBar - 30);   // barre pleine largeur : chip bornee au cadre
         cxPanel.fillStyle = "rgba(10,10,8,.85)";
         cxPanel.fillRect(lx - 3, poc.yTop + poc.hh / 2 - 6.5, 27, 13);
         cxPanel.strokeStyle = "rgba(217,182,77,.45)"; cxPanel.lineWidth = 0.6;
