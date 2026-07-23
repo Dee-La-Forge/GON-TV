@@ -82,8 +82,10 @@
     orb.baseR = r;
     orb.x = 12 + Math.random() * Math.max(20, w - 24);
     orb.y = side === LONG ? -r : h + r;
-    orb.vx = (Math.random() - 0.5) * 0.6;
-    orb.vy = (0.9 + Math.random() * 1.4) * (side === LONG ? 1 : -1);
+    // METEORE : vitesse portee, trajectoire legerement diagonale et decidee
+    // (retour Meddy : "pas des meduses") ; l'ambiance reste plus calme.
+    orb.vx = (Math.random() - 0.5) * 1.2;
+    orb.vy = (dim ? 1.0 + Math.random() * 0.8 : 2.2 + Math.random() * 1.4) * (side === LONG ? 1 : -1);
     orb.ax = 0;
     orb.ay = 0;
     orb.seed = Math.random() * 1000;
@@ -306,31 +308,38 @@
         o.life = Math.min(1, o.life + 0.05);
         if (o.dying) o.fade -= 0.05;
 
-        // turbulence : champ GLOBAL partage + derive lente propre (seed)
+        // turbulence : champ GLOBAL tres attenue — un meteore devie a peine,
+        // il ne flotte pas (retour Meddy : "meteores, pas meduses")
         const f = flowField(o.x, o.y, now + o.seed * 100);
-        o.ax += f.ax;
-        o.ay += f.ay + Math.sin(now * 0.001 + o.seed) * 0.004;
+        o.ax += f.ax * 0.25;
+        o.ay += f.ay * 0.25;
 
-        // attraction legere vers le centre
-        const center = fluxW * 0.5;
-        o.ax += (center - o.x) * 0.00008;
+        // MURS LATERAUX doux : jamais hors cadre — rappel proportionnel a la
+        // penetration de la marge, + garde-fou dur en position.
+        const m = 8 + o.r * 0.5;
+        if (o.x < m) o.vx += (m - o.x) * 0.02;
+        else if (o.x > fluxW - m) o.vx -= (o.x - (fluxW - m)) * 0.02;
 
-        // inertie
+        // inertie : lateral amorti, vertical PORTE (legere acceleration de
+        // chute, vitesse bornee) — trajectoire decidee, queue etiree derriere
+        o.vy += 0.012 * (o.side === LONG ? 1 : -1);
         o.vx += o.ax;
         o.vy += o.ay;
-        o.vx *= 0.97;
-        o.vy *= 0.995;
+        o.vx *= 0.96;
+        o.vy = clamp(o.vy, -4.5, 4.5);
         o.x += o.vx;
         o.y += o.vy;
+        o.x = clamp(o.x, 2, Math.max(4, fluxW - 2));
         o.ax = 0;
         o.ay = 0;
 
-        // pulsation (lissage du rayon vers baseR — la fusion gonfle en douceur)
+        // pulsation quasi eteinte (un meteore ne palpite pas) ; lissage du
+        // rayon vers baseR — la fusion gonfle en douceur
         o.r += (o.baseR - o.r) * 0.15;
         const pulse =
           1 +
-          Math.sin(now * 0.003 + o.seed) * 0.08 +
-          Math.sin(now * 0.007 + o.seed * 3) * 0.04;
+          Math.sin(now * 0.003 + o.seed) * 0.03 +
+          Math.sin(now * 0.007 + o.seed * 3) * 0.015;
         const radius = o.r * pulse;
 
         // queue physique (points recycles par le pool)
