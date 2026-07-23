@@ -322,13 +322,22 @@
         cxPanel.strokeStyle = `rgba(255,255,255,${0.8 * pulse})`; cxPanel.lineWidth = 0.7;
         cxPanel.strokeRect(innerR - poc.wBar, poc.yTop, poc.wBar, poc.hh);
         cxPanel.restore();
-        const lx = Math.max(7, innerR - poc.wBar - 30);   // barre pleine largeur : chip bornee au cadre
-        cxPanel.fillStyle = "rgba(10,10,8,.85)";
-        cxPanel.fillRect(lx - 3, poc.yTop + poc.hh / 2 - 6.5, 27, 13);
-        cxPanel.strokeStyle = "rgba(217,182,77,.45)"; cxPanel.lineWidth = 0.6;
-        cxPanel.strokeRect(lx - 3, poc.yTop + poc.hh / 2 - 6.5, 27, 13);
-        cxPanel.fillStyle = GOLD; cxPanel.font = "600 9px Segoe UI";
-        cxPanel.fillText("POC", lx, poc.yTop + poc.hh / 2 + 3);
+        // chip ANCREE au bord gauche (jamais noyee dans les barres), avec le
+        // PRIX du POC — la ligne doree pleine largeur la relie a sa barre.
+        const pocPrice = (pocBin + 0.5) * binSize;
+        const txt = "POC " + Math.round(pocPrice).toLocaleString("fr-FR");
+        cxPanel.font = "600 9px Segoe UI";
+        const tw = cxPanel.measureText(txt).width;
+        const cy = poc.yTop + poc.hh / 2;
+        cxPanel.save();
+        cxPanel.shadowColor = GOLD; cxPanel.shadowBlur = 6;
+        cxPanel.fillStyle = "rgba(10,10,8,.92)";
+        cxPanel.fillRect(5, cy - 7.5, tw + 8, 15);
+        cxPanel.restore();
+        cxPanel.strokeStyle = "rgba(217,182,77,.65)"; cxPanel.lineWidth = 0.8;
+        cxPanel.strokeRect(5, cy - 7.5, tw + 8, 15);
+        cxPanel.fillStyle = GOLD;
+        cxPanel.fillText(txt, 9, cy + 3.5);
       }
     }
 
