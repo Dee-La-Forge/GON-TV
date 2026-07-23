@@ -267,8 +267,11 @@
       numEls[side].textContent = (shown[side] / 1e6).toFixed(1);
     }
     const tot = s.long + s.short, pl = tot > 0 ? s.long / tot : 0.5;
-    domEls.long.style.width = (pl * 50).toFixed(1) + "%";
-    domEls.short.style.width = ((1 - pl) * 50).toFixed(1) + "%";
+    // balance : seul l'EXCEDENT net s'affiche depuis le centre (50/50 = zero,
+    // 100 % un camp = barre pleine du centre jusqu'a son bord)
+    const net = pl - 0.5;
+    domEls.long.style.width = (net > 0 ? net * 100 : 0).toFixed(1) + "%";
+    domEls.short.style.width = (net < 0 ? -net * 100 : 0).toFixed(1) + "%";
     if (tot > 50000) {
       const side = pl >= 0.5 ? "LONGS" : "SHORTS";
       domEls.pct.textContent = Math.round(Math.max(pl, 1 - pl) * 100) + "% " + side;
@@ -329,12 +332,17 @@
       .gonLiqCnt .cap { font-size:7px; letter-spacing:2px; margin-top:2px; }
       #gonLiqDomWrap { padding:8px 11px 10px; }
       #gonLiqDomBar { position:relative; height:3px; background:#14130e; border-radius:1px; }
-      #gonLiqDomBar .l { position:absolute; left:0; top:0; bottom:0; background:#ff2d5e;
-        box-shadow:0 0 8px rgba(255,45,94,.55); }
-      #gonLiqDomBar .s { position:absolute; right:0; top:0; bottom:0; background:#2f8bff;
-        box-shadow:0 0 8px rgba(47,139,255,.55); }
+      /* Balance (audit design) : zero AU CENTRE, chaque camp s'etend depuis le
+         centre vers SON bord, proportionnel a l'EXCEDENT net (50/50 = rien).
+         Longs (rouge) vers la gauche, shorts (bleu) vers la droite. */
+      #gonLiqDomBar .l { position:absolute; right:50%; top:0; bottom:0; background:#ff2d5e;
+        border-radius:1px 0 0 1px; box-shadow:0 0 8px rgba(255,45,94,.55);
+        transition:width .4s ease; }
+      #gonLiqDomBar .s { position:absolute; left:50%; top:0; bottom:0; background:#2f8bff;
+        border-radius:0 1px 1px 0; box-shadow:0 0 8px rgba(47,139,255,.55);
+        transition:width .4s ease; }
       #gonLiqDomBar .n { position:absolute; left:50%; top:-3px; bottom:-3px; width:1px;
-        background:rgba(217,182,77,.30); }
+        background:rgba(217,182,77,.55); }
       #gonLiqDomCap { display:flex; justify-content:space-between; font-size:7px;
         letter-spacing:1.5px; color:#7d795f; margin-top:5px; }
       #gonLiqChan { flex:1; margin:0 11px; position:relative;
@@ -405,7 +413,7 @@
         <div class="cap" style="color:rgba(47,139,255,.55)">&#9650; SHORTS BR&Ucirc;L&Eacute;S</div>
       </div>
       <div id="gonLiqDomWrap">
-        <div id="gonLiqDomBar"><div class="l" style="width:50%"></div><div class="s" style="width:50%"></div><div class="n"></div></div>
+        <div id="gonLiqDomBar"><div class="l" style="width:0"></div><div class="s" style="width:0"></div><div class="n"></div></div>
         <div id="gonLiqDomCap"><span>DOMINANCE</span><span id="gonLiqPct">&mdash;</span></div>
       </div>
       <div id="gonLiqChan"><canvas></canvas></div>
