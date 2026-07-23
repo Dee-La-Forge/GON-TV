@@ -296,7 +296,8 @@
   // Cache persistant du bootstrap : chaque bougie n'est telechargee qu'UNE fois
   // dans la vie de l'app (entree = POI detecte, ou null si aucun). Le lifecycle
   // n'est PAS cache (il depend des bougies suivantes) : il est rejoue au load.
-  const poiBootCacheKey = (ticker) => `gon.poi.bootcache.${ticker}`;
+  const poiBootCacheKey = (ticker) => `gon.poi.bootcache.${ticker}`;   // cle localStorage (repli)
+  const poiBootIdbKey = (ticker) => "poi.bootcache." + ticker;         // cle IDB (audit 7 : une seule definition)
   function loadBootCacheLS(ticker) {
     try {
       const raw = JSON.parse(localStorage.getItem(poiBootCacheKey(ticker)) || "null");
@@ -309,10 +310,8 @@
     // symboles) ; migration naturelle : lecture localStorage en repli.
     const kv = gon.idbKV;
     if (kv) {
-      try {
-        const raw = await kv.get("poi.bootcache." + ticker);
-        if (raw && raw.version === 2 && poiConfig && raw.binSize === poiConfig.binSize) return raw.entries || {};
-      } catch (_) {}
+      const raw = await kv.get(poiBootIdbKey(ticker)).catch(() => undefined);   // le seam resout toujours ; ceinture hote tiers
+      if (raw && raw.version === 2 && poiConfig && raw.binSize === poiConfig.binSize) return raw.entries || {};
     }
     return loadBootCacheLS(ticker);
   }
@@ -327,17 +326,14 @@
     const pruned = {};
     for (const [k, v] of Object.entries(entries)) if (Number(k) >= minTs) pruned[k] = v;
     const rec = { version: 2, binSize: poiConfig.binSize, entries: pruned };
-    const kv = gon.idbKV;
-    if (kv) {
-      // IndexedDB : ecriture riche asynchrone ; succes -> on libere la vieille
-      // copie localStorage (migration), echec -> repli localStorage ci-dessous.
-      kv.put("poi.bootcache." + ticker, rec).then(ok => {
-        if (ok !== undefined) { try { localStorage.removeItem(poiBootCacheKey(ticker)); } catch (_) {} }
-        else saveBootCacheLS(ticker, rec);
-      }).catch(() => saveBootCacheLS(ticker, rec));
-      return;
-    }
-    saveBootCacheLS(ticker, rec);
+    // IndexedDB : ecriture riche asynchrone ; succes -> on libere la vieille
+    // copie localStorage (migration), IDB indisponible -> repli localStorage.
+    // (Aplati, audit 7 : le seam resout toujours — un seul catch ceinture.)
+    if (!gon.idbKV) return saveBootCacheLS(ticker, rec);
+    gon.idbKV.put(poiBootIdbKey(ticker), rec).then(ok => {
+      if (ok === undefined) return saveBootCacheLS(ticker, rec);
+      try { localStorage.removeItem(poiBootCacheKey(ticker)); } catch (_) {}
+    }).catch(() => {});
   }
   function saveBootCacheLS(ticker, rec) {
     try {

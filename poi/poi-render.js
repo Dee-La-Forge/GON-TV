@@ -49,6 +49,7 @@
   // d'un coup. Filtre par le curseur (minScore), pas par le plancher FORT (>=80)
   // qui ne desencombre que les morts d'ARCHIVE (nombreux).
   const RECENT_DEAD_MS = 24 * 3600 * 1000;
+  const W15 = 900;   // fenetre M15 en secondes — source unique des bornes d'anchorSec (audit 7)
   const PRICE_FONT = "600 11px Consolas, 'Roboto Mono', monospace";
   const SCORE_FONT = "700 9px Consolas, 'Roboto Mono', monospace";
   const CHIP_PAD = 6, CHIP_RULE_GAP = 5;
@@ -230,9 +231,10 @@
       // Repli si le seam bucketStart n'est pas expose (G-Bot anterieur) : ancienne
       // grille inline. Correcte partout SAUF le mensuel (interpolation) — pas de
       // casse, seulement l'ancien comportement mensuel le temps d'un cache.
+      // Audit 7 : FLOOR aussi ici (le ceil residuel contredisait la decision
+      // bougie-contenante et re-creerait le +1 bougie si jamais atteint).
       if (s >= 2419200) return t;
       if (s % 604800 === 0) return Math.floor((t - 345600) / s) * s + 345600;
-      if (s < 900) return Math.ceil(t / s) * s;
       return Math.floor(t / s) * s;
     }
 
@@ -273,37 +275,8 @@
         if (paintData === undefined) paintData = (typeof gon.dataNow === "function" ? gon.dataNow() : gon.series.data()) || null;
         const A = paintData;
         if (A && A.length) {
-          const w0 = Math.floor(ms / 900000) * 900;   // debut de la fenetre M15 (s)
+          const w0 = Math.floor(ms / (W15 * 1000)) * W15;   // debut de la fenetre M15 (s)
           const tSec = ms / 1000;
-          const e = poi.entry ?? poi.entryPrice;   // la LIGNE visible est au prix d'entree
-          // Enveloppe zone∪cluster (equipe debug) : les invalidations d'archive
-          // cassent le CLUSTER (qui deborde la zone) — tester la zone seule
-          // ratait la bougie d'invalidation (13/14 des fallbacks 1m mesures).
-          const zLo = Math.min(poi.zoneLow, poi.clusterLow ?? poi.zoneLow);
-          const zHi = Math.max(poi.zoneHigh, poi.clusterHigh ?? poi.zoneHigh);
-          // BOUGIE CHEVAUCHANTE INCLUSE (equipe debug — cause DOMINANTE mesuree :
-          // 900 s n'est multiple ni de 120/240/480, une fenetre M15 sur deux
-          // commence au MILIEU d'une bougie 2m/4m/8m ; l'exclure posait la
-          // pastille sur la bougie d'a cote dans 11-42 % des morts et 7-22 %
-          // des naissances). Une bougie appartient a la fenetre si son
-          // INTERVALLE [time, time+s) l'intersecte — pas si son open y est.
-          const seek = (from, to, mode, first) => {   // bougie qui touche, 1re (first) ou la PLUS PROCHE de tSec
-            const f0 = from - s;   // positionne la recherche pour attraper la chevauchante
-            let lo = 0, hi = A.length - 1;
-            while (hi - lo > 1) { const m = (lo + hi) >> 1; if (A[m].time < f0) lo = m; else hi = m; }
-            let best = null, bd = Infinity;
-            for (let i = lo; i < A.length && A[i].time < to; i++) {
-              const b = A[i];
-              if (b.time + s <= from) continue;   // finit avant la fenetre : vraiment exclue
-              const hit = mode === "line" ? (e != null && b.low <= e && b.high >= e)
-                : (b.low <= zHi && b.high >= zLo);
-              if (!hit) continue;
-              if (first) return b.time;
-              const d = Math.abs(b.time - tSec);
-              if (d < bd) { bd = d; best = b.time; }
-            }
-            return best;
-          };
           if (birth) {
             cacheable = A[0].time <= w0 && A[A.length - 1].time >= w0 + 900;
             // FIDELITE (equipe debug) : fpTimeStart/fpTimeEnd = datation REELLE
@@ -328,31 +301,67 @@
               else { if (bestV == null || b.low < bestV) { bestV = b.low; v = b.time; } }
             }
           } else {
-            // TOUCHE/MORT — recherche ETAGEE (equipe debug 2026-07-22) : mesure
-            // profonde 2m = 17 % des morts d'ARCHIVE n'avaient AUCUNE bougie
-            // locale touchant ligne/zone dans leur fenetre M15 (regles Antho —
-            // 147/199 INVALIDATED par cassure — vs rollup local) : la pastille
-            // tombait via le repli CEIL sur une bougie qui ne touche RIEN, a
-            // 10-35 bougies de la vraie traversee. Etages :
-            //   1. fenetre exacte : 1re bougie qui CROISE la ligne, repli zone ;
-            //   2. ±1 fenetre M15 : bougie-ligne la PLUS PROCHE de l'instant ;
-            //   3. ±45 min : bougie-zone la plus proche (traversee decalee) ;
-            //   4. bougie CONTENANTE de l'instant (jamais le CEIL dans le vide).
-            v = seek(w0, w0 + 900, "line", true)
-              ?? seek(w0, w0 + 900, "zone", true)
-              ?? seek(w0 - 900, w0 + 1800, "line", false)
-              ?? seek(w0 - 2700, w0 + 3600, "zone", false)
-              ?? (() => {
-                const bkt = typeof gon.bucketStart === "function" ? gon.bucketStart(tSec) : snapped;
-                return (bkt >= A[0].time && bkt <= A[A.length - 1].time) ? bkt : snapped;
-              })();
-            // le cache doit couvrir TOUTE la plage de recherche elargie
-            cacheable = A[0].time <= w0 - 2700 && A[A.length - 1].time >= w0 + 3600;
+            // TOUCHE/MORT — recherche ETAGEE (equipe debug, mesures : 17 % des
+            // morts d'archive sans bougie touchante dans leur fenetre, vraie
+            // traversee a 10-35 bougies ; 13/14 fallbacks 1m = cassure de
+            // CLUSTER hors zone ; bougie CHEVAUCHANTE exclue = 11-42 % de
+            // mauvaises bougies en 2m/4m/8m). Une bougie appartient a la
+            // fenetre si son INTERVALLE [time, time+s) l'intersecte.
+            const e = poi.entry ?? poi.entryPrice;   // la LIGNE visible est au prix d'entree
+            const zsLo = poi.zoneLow, zsHi = poi.zoneHigh;                                 // zone PURE
+            const zLo = Math.min(zsLo, poi.clusterLow ?? zsLo);                            // enveloppe
+            const zHi = Math.max(zsHi, poi.clusterHigh ?? zsHi);                           //  ∪ cluster
+            const seek = (from, to, mode, first) => {   // bougie qui touche, 1re (first) ou la PLUS PROCHE de tSec
+              const f0 = from - s;   // attrape la chevauchante
+              let lo = 0, hi = A.length - 1;
+              while (hi - lo > 1) { const m = (lo + hi) >> 1; if (A[m].time < f0) lo = m; else hi = m; }
+              let best = null, bd = Infinity;
+              for (let i = lo; i < A.length && A[i].time < to; i++) {
+                const b = A[i];
+                if (b.time + s <= from) continue;   // finit avant la fenetre : vraiment exclue
+                const hit = mode === "line" ? (e != null && b.low <= e && b.high >= e)
+                  : mode === "zoneStrict" ? (b.low <= zsHi && b.high >= zsLo)
+                  : (b.low <= zHi && b.high >= zLo);
+                if (!hit) continue;
+                if (first) return b.time;
+                const d = Math.abs(b.time - tSec);
+                if (d < bd) { bd = d; best = b.time; }
+              }
+              return best;
+            };
+            // Etage 1 (fenetre exacte) : ligne -> zone PURE (audit 7 : l'enveloppe
+            // cluster en premier pouvait attraper une bougie AVANT la vraie
+            // touche de zone) -> enveloppe cluster. Etages 2-3 elargis. Repli :
+            // snapped = bougie CONTENANTE (FLOOR).
+            let viaExact = true;
+            let r = seek(w0, w0 + W15, "line", true)
+              ?? seek(w0, w0 + W15, "zoneStrict", true)
+              ?? seek(w0, w0 + W15, "zone", true);
+            if (r == null) {
+              viaExact = false;
+              r = seek(w0 - W15, w0 + 2 * W15, "line", false)
+                ?? seek(w0 - 3 * W15, w0 + 4 * W15, "zone", false);
+            }
+            v = r ?? snapped;
+            // Cache a deux niveaux (audit 7) : un resultat d'etage 1 est stable des
+            // que SA fenetre est couverte (l'exigence large rendait les TF secondes
+            // et toute mort recente JAMAIS cacheables -> recalcul par frame) ;
+            // l'exigence large ne s'applique qu'aux resultats des etages 2-4.
+            cacheable = viaExact
+              ? (A[0].time <= w0 && A[A.length - 1].time >= w0 + W15)
+              : (A[0].time <= w0 - 3 * W15 && A[A.length - 1].time >= w0 + 4 * W15);
           }
         }
       } catch (_) {}
       if (cacheable) {
-        if (anchorCache.size > 4000) anchorCache.clear();
+        if (anchorCache.size > 4000) {
+          // Eviction PARTIELLE (audit 7) : le clear() total en cours de frame sur
+          // vue tres dezoomee (>2000 POI visibles) forcait le recalcul de TOUT a
+          // chaque frame. Map itere en ordre d'insertion -> on retire les 1000
+          // plus anciennes entrees.
+          let n = 0;
+          for (const k of anchorCache.keys()) { anchorCache.delete(k); if (++n >= 1000) break; }
+        }
         anchorCache.set(key, v);
       }
       return v;

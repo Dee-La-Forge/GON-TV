@@ -433,8 +433,10 @@ let alertPrev = null, alertFlashUntil = 0, hasAlerts = false;   // dernier prix 
    trade-par-trade, quel que soit le transport. */
 function checkAlerts(price, lo = price, hi = price) {
   // NE tire PAS pendant un rattrapage en masse (fillGap/fillGapSec rejouent des prix HISTORIQUES → alertes rétroactives)
-  if (!hasAlerts || gapFilling) { alertPrev = null; return; }
-  if (alertPrev != null && (price !== alertPrev || hi > alertPrev || lo < alertPrev)) {
+  if (!hasAlerts || gapFilling) { alertPrev = null; alertBarT = null; return; }   // barT aussi (audit 7) : les extrêmes déjà-vus repartent propres après un rattrapage
+  // lo ≤ price ≤ hi partout (défauts lo=hi=price) : « price ≠ alertPrev » était
+  // strictement couvert par les deux autres termes (audit 7, terme fantôme).
+  if (alertPrev != null && (hi > alertPrev || lo < alertPrev)) {
     const now = Date.now();
     for (const d of drawings) {
       if (d.type !== 'alert') continue;
@@ -546,22 +548,33 @@ function readIdx() {   // index LRU des contextes persistés, réparé si corrom
   if (!Array.isArray(idx)) idx = [];
   return idx;
 }
+const persistable = () => candles.length && ctxFresh();   // concept unique « contexte persistable » (audit 7) — re-testé en async car symbol/tf peuvent changer
 function persistBars(lastGasp) {
-  if (!candles.length || !ctxFresh()) return;
+  if (!persistable()) return;
   // Tiroir profond IndexedDB en vie courante ; pagehide (lastGasp) reste sur le
   // localStorage SYNCHRONE — une écriture IDB peut être tuée avec la page.
   if (idb && !lastGasp) {
     if (isSecTf() && candles.length > IDB_BARS_CAP) return;   // secondes tronquées : curseur incohérent, on ne persiste que si tout tient
-    const dKey = symbol + '|' + tf;
+    const dKey = symbol + '|' + tf, lsKey = barsKey(symbol, tf);
     const rec = { v: BARS_SCHEMA, t: Date.now(), atStart: oldestDone && candles.length <= IDB_BARS_CAP,
       fi: firstTradeId, lm: lastTradeMs, la: lastAggId, b: candles.slice(-IDB_BARS_CAP) };
-    idbPut('bars', dKey, rec).then(ok => { if (ok === undefined) persistBarsLS(); else idbPruneBars(dKey); });
+    idbPut('bars', dKey, rec).then(ok => {
+      if (ok === undefined) {
+        // Audit 7 : le repli « persistBarsLS() » relisait les GLOBAUX au moment
+        // du callback — le contexte avait déjà changé (cacheBars précède tf=t)
+        // → repli mort. On écrit CE snapshot, borné à BARS_CAP pour le LS.
+        try {
+          localStorage.setItem(lsKey, JSON.stringify({ ...rec,
+            atStart: rec.atStart && rec.b.length <= BARS_CAP, b: rec.b.slice(-BARS_CAP) }));
+        } catch {}
+      } else idbPruneBars(dKey);
+    });
     return;
   }
   persistBarsLS();
 }
 function persistBarsLS() {
-  if (!candles.length || !ctxFresh()) return;
+  if (!persistable()) return;
   // secondes tronquées : firstTradeId ne correspondrait plus à candles[0] → on ne persiste que si tout tient
   if (isSecTf() && candles.length > BARS_CAP) return;
   const key = barsKey(symbol, tf);
@@ -623,7 +636,7 @@ function validPersisted(o) {   // {b, atStart, fi, lm, la} sain et pas trop pér
   // Exceptions : TF secondes (seau absent = zéro trade, légitime) et grille
   // mensuelle (pas calendaire variable).
   const chkGap = !isSecTf() && tfDef().src !== '1M';
-  const step = TFSEC[tfDef().src] * (tfDef().fact || 1);
+  const step = tfDef().sec;   // identité prouvée (audit 7) : sec === TFSEC[src]×fact pour les 23 TF — même unité que la garde de couture (2*step ≤ tolérance 3*step : le fusionné reste valide)
   let prev = -Infinity;   // validation profonde : OHLCV numérique, temps STRICTEMENT croissant
   for (const c of o.b) {
     if (!c || !numOk(c.time) || c.time <= prev || !numOk(c.open) || !numOk(c.high) || !numOk(c.low) || !numOk(c.close) || !numOk(c.volume)) return false;
@@ -632,12 +645,11 @@ function validPersisted(o) {   // {b, atStart, fi, lm, la} sain et pas trop pér
   }
   return true;
 }
-function loadPersisted() {   // localStorage : renvoie l'enregistrement sain, sinon null
+function loadPersisted() {   // localStorage : renvoie l'enregistrement sain (ou son suffixe réparé), sinon null
   try {
     const raw = localStorage.getItem(barsKey(symbol, tf));
     if (!raw) return null;
-    const o = JSON.parse(raw);
-    return validPersisted(o) ? o : null;
+    return sanitizePersisted(JSON.parse(raw));
   } catch { return null; }
 }
 
@@ -676,23 +688,44 @@ const idbReq = (store, mode, op) => new Promise(res => {
 const idbGet = (store, key) => idbReq(store, 'readonly', os => os.get(key));
 const idbPut = (store, key, val) => idbReq(store, 'readwrite', os => os.put(val, key));
 const idbDel = (store, key) => idbReq(store, 'readwrite', os => os.delete(key));
+const idbRmw = (store, key, fn) => new Promise(res => {
+  // get+put dans UNE transaction readwrite (audit 7) : le RMW en 2 transactions
+  // perdait des updates entre onglets/apps (même origin = même DB) → entrées
+  // d'index écrasées → enregistrements 'bars' orphelins jamais purgés.
+  if (!idb) return res(undefined);
+  try {
+    const os = idb.transaction(store, 'readwrite').objectStore(store);
+    const rq = os.get(key);
+    rq.onerror = () => res(undefined);
+    rq.onsuccess = () => {
+      try { const rq2 = os.put(fn(rq.result), key); rq2.onsuccess = () => res(rq2.result); rq2.onerror = () => res(undefined); }
+      catch { res(undefined); }
+    };
+  } catch { res(undefined); }
+});
 async function idbPruneBars(curKey) {   // LRU IDB_CTX_MAX + âge 14 j, index léger 'bars.idx'
-  const idx = (await idbGet('kv', 'bars.idx')) || {};
-  idx[curKey] = Date.now();
-  let live = Object.keys(idx).filter(k => k === curKey || Date.now() - idx[k] <= IDB_MAX_AGE);
-  const dead = Object.keys(idx).filter(k => !live.includes(k));
-  live.sort((a, b) => idx[a] - idx[b]);
-  while (live.length > IDB_CTX_MAX) dead.push(live.shift());   // curKey = plus récent → jamais évincé
-  for (const k of dead) idbDel('bars', k);
-  const clean = {}; for (const k of live) clean[k] = idx[k];
-  idbPut('kv', 'bars.idx', clean);
+  const dead = [];
+  await idbRmw('kv', 'bars.idx', raw => {
+    const idx = raw || {};
+    idx[curKey] = Date.now();
+    let live = Object.keys(idx).filter(k => k === curKey || Date.now() - idx[k] <= IDB_MAX_AGE);
+    for (const k of Object.keys(idx)) if (!live.includes(k)) dead.push(k);
+    live.sort((a, b) => idx[a] - idx[b]);
+    while (live.length > IDB_CTX_MAX) dead.push(live.shift());   // curKey = plus récent → jamais évincé
+    const clean = {}; for (const k of live) clean[k] = idx[k];
+    return clean;
+  });
+  for (const k of dead) idbDel('bars', k);   // idempotent : re-purgé au prochain prune si interrompu
 }
 async function loadPersistedDeep() {   // IDB (PROFONDEUR) ⊕ localStorage (FRAÎCHEUR du pagehide) : fusion des deux
-  await idbOpen;
+  // Audit 7 : idbOpen peut pendre sur un profil navigateur pathologique (LevelDB
+  // verrouillé — aucun callback ne tire) → au-delà de 1,5 s on continue sans IDB.
+  await Promise.race([idbOpen, new Promise(r => setTimeout(r, 1500))]);
+  if (!idb) return loadPersisted();
+  const oP = idbGet('bars', symbol + '|' + tf);   // transaction lancée PENDANT le parse LS (audit 7 : latences additionnées sinon)
   const ls = loadPersisted();
-  if (!idb) return ls;
-  const o = await idbGet('bars', symbol + '|' + tf);
-  if (!validPersisted(o)) return ls;
+  const o = sanitizePersisted(await oP);
+  if (!o) return ls;
   if (!ls || o.t >= ls.t) return o;   // IDB à la fois profond ET plus frais
   // localStorage plus frais (écrit au pagehide) mais tronqué à BARS_CAP : on
   // greffe sa queue fraîche sur la profondeur IDB — sinon « le plus frais
@@ -702,8 +735,23 @@ async function loadPersistedDeep() {   // IDB (PROFONDEUR) ⊕ localStorage (FRA
   // intérieur permanent → on prend la queue fraîche seule (fillGap complète).
   const cut = ls.b[0].time;
   if (o.b[o.b.length - 1].time + 2 * tfDef().sec < cut) return ls;
-  const b = o.b.filter(c => c.time < cut).concat(ls.b);   // strictement croissant : préfixe < cut, puis ls croissant
-  return { v: o.v, t: ls.t, atStart: o.atStart, fi: o.fi, lm: ls.lm, la: ls.la, b };
+  const pre = o.b.filter(c => c.time < cut);   // strictement croissant : préfixe < cut, puis ls croissant
+  if (!pre.length) return ls;   // audit 7 : fi/atStart de o décriraient un b[0] disparu
+  return { v: o.v, t: ls.t, atStart: o.atStart, fi: o.fi, lm: ls.lm, la: ls.la, b: pre.concat(ls.b) };
+}
+function sanitizePersisted(o) {
+  // Audit 7 : un trou d'exchange RÉEL (maintenance Binance > 3 pas) ne jette
+  // plus TOUT l'enregistrement — on garde le SUFFIXE après le dernier trou
+  // (atStart/fi neutralisés : le préfixe amputé ne les décrit plus). Secondes
+  // et mensuel restent au régime strict (trous légitimes / grille variable).
+  if (validPersisted(o)) return o;
+  if (!o || !Array.isArray(o.b) || o.b.length < 10 || isSecTf() || tfDef().src === '1M') return null;
+  const step = tfDef().sec;
+  let cutIdx = -1;
+  for (let i = 1; i < o.b.length; i++) if (o.b[i] && o.b[i - 1] && o.b[i].time - o.b[i - 1].time > 3 * step) cutIdx = i;
+  if (cutIdx < 0) return null;   // invalide pour une autre raison qu'un trou
+  const t = { ...o, b: o.b.slice(cutIdx), atStart: false, fi: null };
+  return validPersisted(t) ? t : null;
 }
 let dataCtx = '';   // contexte des candles chargées ; ≠ symbol|tf courant pendant un backoff = données périmées
 const ctxFresh = () => dataCtx === symbol + '|' + tf;
@@ -1152,6 +1200,7 @@ async function load(keepZoom = false, attempt = 0) {
   oldErrUntil = 0;   // la pause d'erreur du scroll-back ne survit pas à un changement de contexte
   hoverT = null;     // nouveau contexte : la légende live reprend la main
   alertPrev = null;  // pas de franchissement fantôme entre l'ancien prix et le nouveau (ex. BTC→DOGE)
+  alertBarT = null; alertSeenHi = alertSeenLo = null;   // audit 7 : reset ATOMIQUE — les extrêmes déjà-vus de l'ancien symbole ne survivent plus (l'invariant reposait accidentellement sur alertPrev seul)
   $('dot').classList.remove('live');
   const retry = () => {   // échec ≠ app morte : backoff 5 s → 30 s tant que rien ne nous a supplantés
     retryTimer = setTimeout(() => { if (seq === loadSeq && !replay) load(keepZoom, attempt + 1); },
@@ -1161,6 +1210,7 @@ async function load(keepZoom = false, attempt = 0) {
     let k, fromCache = false;
     const cached = barCache.get(symbol + '|' + tf);
     const disk = cached ? null : await loadPersistedDeep();   // disque (IDB profond ou localStorage, le plus frais) : uniquement si pas en mémoire vive
+    if (seq !== loadSeq || replay) return;   // audit 7 : un load supplanté pendant l'await disque n'écrit pas les curseurs (oldestDone/fi/la) du contexte suivant
     if (cached && cached.candles.length) {   // TF déjà visité : zéro réseau, rattrapage du trou après affichage
       barCache.delete(symbol + '|' + tf);
       k = cached.candles;
@@ -1300,7 +1350,10 @@ function startPoll(seq) {
           // clockSynced (revue) : horloge machine seule = juge non fiable (>15 s
           // d'écart inverserait live/rattrapage) — tant que la 1re sync n'a pas
           // réussi, on classe « live » (comportement pré-R2, borné à ~1 tick).
-          const stale = clockSynced && Date.now() + clockOff - k[k.length - 1].T > 15000;
+          // pollSlept (audit 7) : une veille avec queue de lot FRAÎCHE (quelqu'un
+          // vient de trader) battait le juge d'âge — le latch de ticks manqués
+          // couvre ce cas ET la bascule WS→poll (où pollLast repart de 0).
+          const stale = pollSlept || (clockSynced && Date.now() + clockOff - k[k.length - 1].T > 15000);
           if (stale) { gapFilling = true; try { applyTrades(k); } finally { gapFilling = false; } }
           else applyTrades(k);   // lot court ET frais = LIVE : les alertes tirent normalement
         }
@@ -2873,10 +2926,10 @@ if ('serviceWorker' in navigator && location.hostname.endsWith('github.io')) nav
 <script src="poi/poi-detector.js?v=3"></script>
 <script src="poi/poi-lifecycle.js?v=7"></script>
 <script src="poi/stream.js?v=1"></script>
-<script src="poi/poi-render.js?v=69"></script>
-<script src="poi/poi-feature.js?v=43"></script>
+<script src="poi/poi-render.js?v=70"></script>
+<script src="poi/poi-feature.js?v=44"></script>
 <script src="poi/liq-flux.js?v=29"></script>
-<script src="poi/whale-sonar.js?v=29"></script>
+<script src="poi/whale-sonar.js?v=30"></script>
 <script src="poi/confluence.js?v=28"></script>
 </body>
 </html>

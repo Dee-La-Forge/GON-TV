@@ -139,14 +139,20 @@
   async function seedThresholds() {
     for (const s of SYMS) {
       if (stats[s].ready) continue;
-      // Horloge 429 partagée (revue) : un ban vu ailleurs = le seed s'arrête
-      // au lieu de l'entretenir (le live echantillonnera).
-      if (gon && gon.apiCool && Date.now() < gon.apiCool.until()) break;
+      // Horloge 429 partagée (revue) : un ban vu ailleurs = le seed se REPORTE
+      // au lieu d'abandonner (audit 7 : le break laissait les symboles restants
+      // jamais semés — P99.9 sous-calibré des heures sur les alts calmes).
+      // Idempotent : stats[s].ready fait sauter les déjà-semés au retour.
+      if (gon && gon.apiCool && Date.now() < gon.apiCool.until()) {
+        setTimeout(seedThresholds, gon.apiCool.until() - Date.now() + 1000);
+        return;
+      }
       try {
         const r = await fetch(`https://fapi.binance.com/fapi/v1/aggTrades?symbol=${s}&limit=1000`, { signal: AbortSignal.timeout(10000) });
         if (r.status === 429 || r.status === 418) {
           if (gon && gon.apiCool) gon.apiCool.hit(Number(r.headers.get("retry-after")));   // fait taire les 3 autres
-          break;   // rate-limit : STOP, le live echantillonnera
+          setTimeout(seedThresholds, (gon && gon.apiCool ? Math.max(0, gon.apiCool.until() - Date.now()) : 60000) + 1000);   // reprend apres l'echeance (audit 7)
+          break;   // rate-limit : STOP pour ce tour, le live echantillonne en attendant
         }
         if (r.ok) {
           const st = stats[s];
