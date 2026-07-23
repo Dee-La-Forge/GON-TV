@@ -34,8 +34,80 @@
   // Teinte vers le blanc (coeur lumineux) — melange arithmetique, pas un degrade.
   const tint = (c, f) => [Math.round(c[0] + (255 - c[0]) * f), Math.round(c[1] + (255 - c[1]) * f), Math.round(c[2] + (255 - c[2]) * f)];
 
+  /* ---------- moteur organique (V2 Meddy) ---------- */
+  function noise(x, y, t) {
+    return Math.sin(x * 0.013 + t * 0.0017) *
+           Math.cos(y * 0.017 - t * 0.0013);
+  }
+
+  function clamp(v, a, b) {
+    return Math.max(a, Math.min(b, v));
+  }
+
+  function createOrb(side, usd, dim = false) {
+    const r = dim
+      ? Math.min(7, Math.max(3.5, (Math.log10(usd) - 3.3) * 1.7))
+      : Math.min(44, Math.max(5, (Math.log10(usd) - 4.1) * 10));
+
+    const w = fluxW || 130;
+    const h = fluxH || 300;
+    const seed = Math.random() * 1000;
+
+    const orb = {
+      side,
+      dim,
+      r,
+      baseR: r,
+      x: 12 + Math.random() * Math.max(20, w - 24),
+      y: side === LONG ? -r : h + r,
+
+      vx: (Math.random() - 0.5) * 0.6,
+      vy: (0.9 + Math.random() * 1.4) * (side === LONG ? 1 : -1),
+
+      ax: 0,
+      ay: 0,
+
+      seed,
+      life: 0,
+      fade: 1,
+
+      pulse: Math.random() * 6.28,
+      amp: 2 + Math.random() * 4,
+
+      trail: [],
+      maxTrail: Math.round(12 + r * 1.2)
+    };
+
+    orbs.push(orb);
+
+    if (!dim) {
+      // particules satellites pour les grosses liquidations
+      if (usd > 5e6) {
+        const count = Math.min(14, Math.round(usd / 5e6));
+        for (let i = 0; i < count; i++) {
+          particles.push({
+            x: orb.x,
+            y: orb.y,
+            vx: (Math.random() - 0.5) * 3,
+            vy: (Math.random() - 0.5) * 3,
+            life: 1,
+            side
+          });
+        }
+      }
+
+      pings.push({
+        side,
+        x: orb.x,
+        y: side === LONG ? 8 : h - 8,
+        born: performance.now(),
+        r
+      });
+    }
+  }
+
   let gon = null, S = null;
-  let events = [], orbs = [], pings = [], waves = [];
+  let events = [], orbs = [], pings = [], waves = [], particles = [];
   let panel, waveCv, waveCx, fluxCv, fluxCx, numEls, domEls, evList, symEl, btn;
   let visible = true, curSymbol = "", rafId = 0;
   // Dimensions CSS (px logiques) du canal et de l'onde : le bitmap est mis a
@@ -61,19 +133,10 @@
     // Visuels UNIQUEMENT quand le panneau est affiche : masque, rien ne les
     // purge (rAF suspendu) et waves croissait sans borne toute la nuit.
     if (panelShown()) {
-      // Rampe log ACCENTUEE : petites liq discretes (~5-8 px), grosses
-      // spectaculaires (jusqu'a ~44 px). Pente forte -> hierarchie nette sans
-      // seuil discret (choix utilisateur : continu accentue).
-      const r = Math.min(44, Math.max(5, (Math.log10(usd) - 4.1) * 10));
+      // Rampe log ACCENTUEE (dans createOrb) : petites liq discretes, grosses
+      // spectaculaires jusqu'a ~44 px + particules satellites au-dela de 5M$.
       if (orbs.length < 140) {
-        const w = fluxW || 130, h = fluxH || 300;
-        const x = 12 + Math.random() * Math.max(20, w - 24);
-        orbs.push({ side, r, x, y: side === LONG ? -r : h + r, ph: Math.random() * 6.28,
-          amp: 2.5 + Math.random() * 3,   // derive propre a chaque orbe (moins mecanique)
-          v: (0.8 + Math.random() * 1.3) * (side === LONG ? 1 : -1) });
-        // r porte dans le ping -> l'anneau de choc grandit avec la liquidation
-        // (petit = discret, gros = onde de choc d'impact).
-        pings.push({ side, x, y: side === LONG ? 8 : h - 8, born: performance.now(), r });
+        createOrb(side, usd, false);
       }
       waves.push({ side, x: -60, v: 9 + Math.log10(usd), w: 30 + (Math.log10(usd) - 4) * 34 });
       if (waves.length > 80) waves.splice(0, waves.length - 80);   // borne dure
@@ -98,12 +161,7 @@
     // tamisees, sans ping ni onde, hors compteurs/journal (qui restent la
     // verite du symbole affiche). Le canal vit au rythme du marche entier.
     if (panelShown() && orbs.length < 140) {
-      const w = fluxW || 130, h = fluxH || 300;   // px CSS (audit : les dims BITMAP ×dpr faisaient naitre les boules hors cadre en retina)
-      orbs.push({ side, dim: true,
-        r: Math.min(7, Math.max(3.5, (Math.log10(usd) - 3.3) * 1.7)),
-        x: 12 + Math.random() * Math.max(20, w - 24),
-        y: side === LONG ? -3 : h + 3, ph: Math.random() * 6.28,
-        v: (0.5 + Math.random() * 0.8) * (side === LONG ? 1 : -1) });
+      createOrb(side, usd, true);   // dims en px CSS dans createOrb (audit retina conserve)
     }
   }
 
@@ -117,7 +175,7 @@
 
   function resetForSymbol(sym) {
     curSymbol = sym;
-    events = []; orbs = []; pings = []; waves = [];
+    events = []; orbs = []; pings = []; waves = []; particles = [];
     shown.long = 0; shown.short = 0;   // sinon les compteurs affichent des millions fantomes qui decroissent
     evList.textContent = "";
     symEl.textContent = sym;
@@ -168,88 +226,178 @@
         if (age >= 1) { pings.splice(i, 1); continue; }
         // Anneau de choc : expansion en ease-out (rapide puis freine) + echo
         // interieur discret. Rayon final et epaisseur croissent avec r.
-        const rr = p.r || 6, ease = 1 - (1 - age) * (1 - age);
-        const a0 = Math.min(0.95, 0.5 + rr * 0.013) * (1 - age);
+        const rr = p.r || 6;
+        const ease = 1 - Math.pow(1 - age, 3);
+        const a0 = Math.min(0.95, 0.55 + rr * 0.015) * (1 - age);
+
         fluxCx.strokeStyle = rgba(COLOR[p.side], a0);
-        fluxCx.lineWidth = 1 + rr * 0.05;
-        fluxCx.beginPath(); fluxCx.arc(p.x, p.y, 3 + ease * (14 + rr * 2.2), 0, Math.PI * 2); fluxCx.stroke();
+        fluxCx.lineWidth = 1.2 + rr * 0.06;
+        fluxCx.beginPath();
+        fluxCx.arc(p.x, p.y, 3 + ease * (16 + rr * 2.8), 0, Math.PI * 2);
+        fluxCx.stroke();
+
         fluxCx.strokeStyle = rgba(COLOR[p.side], a0 * 0.45);
-        fluxCx.lineWidth = 0.75;
-        fluxCx.beginPath(); fluxCx.arc(p.x, p.y, 2 + ease * (8 + rr * 1.1), 0, Math.PI * 2); fluxCx.stroke();
+        fluxCx.lineWidth = 0.8;
+        fluxCx.beginPath();
+        fluxCx.arc(p.x, p.y, 2 + ease * (10 + rr * 1.4), 0, Math.PI * 2);
+        fluxCx.stroke();
       }
+      /* ---------- orbs organiques (V2 Meddy) ---------- */
       for (let i = orbs.length - 1; i >= 0; i--) {
-        const o = orbs[i]; o.y += o.v; o.ph += 0.045;
-        const x = o.x + Math.sin(o.ph) * (o.amp || 4);
-        if ((o.side === LONG && o.y - o.r > fluxH) || (o.side === SHORT && o.y + o.r < 0)) { orbs.splice(i, 1); continue; }
-        const c = COLOR[o.side];
-        fluxCx.save();
-        // Fusion ADDITIVE : les passes s'illuminent au lieu de s'empiler en
-        // disques opaques — rendu plasma, chevauchements lumineux, zero bord dur.
-        fluxCx.globalCompositeOperation = "lighter";
-        if (o.dim) {
-          // boule d'ambiance (autre symbole) : petit plasma doux, sans coeur ni
-          // queue — subordonnee aux liquidations du symbole courant. Halo
-          // PROPORTIONNEL au rayon (un flou fixe transforme les petites en
-          // patates floues).
-          fluxCx.shadowColor = rgba(c, 0.9); fluxCx.shadowBlur = 4 + o.r * 0.8;
-          fluxCx.fillStyle = rgba(c, 0.30);
-          fluxCx.beginPath(); fluxCx.arc(x, o.y, o.r, 0, Math.PI * 2); fluxCx.fill();
-          fluxCx.shadowBlur = 2;
-          fluxCx.fillStyle = rgba(tint(c, 0.25), 0.45);
-          fluxCx.beginPath(); fluxCx.arc(x, o.y, o.r * 0.55, 0, Math.PI * 2); fluxCx.fill();
-        } else {
-          // QUEUE-COMETE sur TRAJECTOIRE REELLE : historique de positions par
-          // orbe — la queue suit le chemin sinueux (sway compris) et trace
-          // du BON cote pour les deux sens (les shorts montent : l'ancienne
-          // queue geometrique pointait toujours vers le haut, faux pour eux).
-          // Effilage en easing quadratique sur 10-26 segments courts (fini le
-          // banding des 5 gros troncons) + coeur clair sur le dernier tiers.
-          o.trail = o.trail || [];
-          o.trail.push({ x, y: o.y });
-          const maxT = Math.round(10 + o.r * 0.9);
-          if (o.trail.length > maxT) o.trail.splice(0, o.trail.length - maxT);
-          const n = o.trail.length;
-          fluxCx.lineCap = "round"; fluxCx.lineJoin = "round";
-          for (let s = 1; s < n; s++) {
-            const t = s / n, tt = t * t;   // fine et diaphane au bout, pleine pres du corps
-            fluxCx.strokeStyle = rgba(c, 0.04 + 0.30 * tt);
-            fluxCx.lineWidth = Math.max(0.5, o.r * 0.60 * tt);
-            fluxCx.beginPath();
-            fluxCx.moveTo(o.trail[s - 1].x, o.trail[s - 1].y);
-            fluxCx.lineTo(o.trail[s].x, o.trail[s].y);
-            fluxCx.stroke();
-          }
-          for (let s = Math.max(1, n - Math.ceil(n / 3)); s < n; s++) {
-            const t = s / n, tt = t * t;
-            fluxCx.strokeStyle = rgba(tint(c, 0.55), 0.22 * tt);
-            fluxCx.lineWidth = Math.max(0.4, o.r * 0.20 * tt);
-            fluxCx.beginPath();
-            fluxCx.moveTo(o.trail[s - 1].x, o.trail[s - 1].y);
-            fluxCx.lineTo(o.trail[s].x, o.trail[s].y);
-            fluxCx.stroke();
-          }
-          // CORPS en trois passes : halo large tres doux -> disque colore ->
-          // coeur teinte blanc + point speculaire. Le tout en additif.
-          // Halos PROPORTIONNELS au rayon : les petits orbes restent nets et
-          // denses (fini la patate floue), les gros gardent leur embrasement.
-          fluxCx.shadowColor = rgba(c, 1); fluxCx.shadowBlur = 6 + o.r * 1.6;
-          fluxCx.fillStyle = rgba(c, 0.34);
-          fluxCx.beginPath(); fluxCx.arc(x, o.y, o.r, 0, Math.PI * 2); fluxCx.fill();
-          fluxCx.shadowBlur = 3 + o.r * 0.4;
-          fluxCx.fillStyle = rgba(c, 0.55);
-          fluxCx.beginPath(); fluxCx.arc(x, o.y, o.r * 0.72, 0, Math.PI * 2); fluxCx.fill();
-          fluxCx.shadowBlur = 2 + o.r * 0.25;
-          fluxCx.fillStyle = rgba(tint(c, 0.55), 0.85);
-          fluxCx.beginPath(); fluxCx.arc(x, o.y, o.r * 0.42, 0, Math.PI * 2); fluxCx.fill();
-          // point speculaire : seulement au-dela de 6 px de rayon (en-deca il
-          // devient un pixel de bruit qui salit le petit orbe)
-          if (o.r >= 6) {
-            fluxCx.shadowBlur = 0; fluxCx.fillStyle = "rgba(255,255,255,.85)";
-            fluxCx.beginPath(); fluxCx.arc(x, o.y - o.r * 0.22, Math.max(0.8, o.r * 0.16), 0, Math.PI * 2); fluxCx.fill();
-          }
+        const o = orbs[i];
+
+        // apparition progressive
+        o.life = Math.min(1, o.life + 0.05);
+
+        // turbulence organique
+        const n = noise(o.x, o.y, now + o.seed * 100);
+
+        o.ax += n * 0.03;
+        o.ay += Math.sin(now * 0.001 + o.seed) * 0.004;
+
+        // attraction legere vers le centre
+        const center = fluxW * 0.5;
+        o.ax += (center - o.x) * 0.00008;
+
+        // inertie
+        o.vx += o.ax;
+        o.vy += o.ay;
+
+        o.vx *= 0.97;
+        o.vy *= 0.995;
+
+        o.x += o.vx;
+        o.y += o.vy;
+
+        o.ax = 0;
+        o.ay = 0;
+
+        // pulsation
+        const pulse =
+          1 +
+          Math.sin(now * 0.003 + o.seed) * 0.08 +
+          Math.sin(now * 0.007 + o.seed * 3) * 0.04;
+
+        const radius = o.baseR * pulse;
+
+        // queue physique
+        o.trail.unshift({ x: o.x, y: o.y });
+        if (o.trail.length > o.maxTrail) {
+          o.trail.pop();
         }
+
+        // disparition progressive
+        if (
+          (o.side === LONG && o.y - radius > fluxH - 20) ||
+          (o.side === SHORT && o.y + radius < 20)
+        ) {
+          o.fade -= 0.04;
+        }
+
+        if (o.fade <= 0) {
+          orbs.splice(i, 1);
+          continue;
+        }
+
+        const c = COLOR[o.side];
+        const alpha = o.life * o.fade;
+
+        fluxCx.save();
+        fluxCx.globalCompositeOperation = "lighter";
+
+        /* ----- queue de comete ----- */
+        for (let t = o.trail.length - 1; t > 0; t--) {
+          const p1 = o.trail[t];
+          const p2 = o.trail[t - 1];
+          const k = 1 - t / o.trail.length;
+          const a = alpha * k * k * 0.45;
+          fluxCx.strokeStyle = rgba(c, a);
+          fluxCx.lineWidth = Math.max(0.5, radius * k * 0.7);
+          fluxCx.lineCap = "round";
+          fluxCx.lineJoin = "round";
+          fluxCx.beginPath();
+          fluxCx.moveTo(p1.x, p1.y);
+          fluxCx.lineTo(p2.x, p2.y);
+          fluxCx.stroke();
+        }
+
+        /* ----- halo externe ----- */
+        fluxCx.shadowColor = rgba(c, 1);
+        fluxCx.shadowBlur = radius * 2.2;
+        fluxCx.fillStyle = rgba(c, alpha * 0.12);
+        fluxCx.beginPath();
+        fluxCx.arc(o.x, o.y, radius * 1.8, 0, Math.PI * 2);
+        fluxCx.fill();
+
+        /* ----- halo moyen ----- */
+        fluxCx.shadowBlur = radius * 1.3;
+        fluxCx.fillStyle = rgba(c, alpha * 0.22);
+        fluxCx.beginPath();
+        fluxCx.arc(o.x, o.y, radius * 1.2, 0, Math.PI * 2);
+        fluxCx.fill();
+
+        /* ----- corps ----- */
+        fluxCx.shadowBlur = radius * 0.9;
+        fluxCx.fillStyle = rgba(c, alpha * (o.dim ? 0.35 : 0.55));
+        fluxCx.beginPath();
+        fluxCx.arc(o.x, o.y, radius, 0, Math.PI * 2);
+        fluxCx.fill();
+
+        if (!o.dim) {
+          /* ----- coeur ----- */
+          fluxCx.shadowBlur = radius * 0.5;
+          fluxCx.fillStyle = rgba(tint(c, 0.55), alpha * 0.9);
+          fluxCx.beginPath();
+          fluxCx.arc(o.x, o.y, radius * 0.45, 0, Math.PI * 2);
+          fluxCx.fill();
+
+          /* ----- reflet ----- */
+          fluxCx.shadowBlur = 0;
+          fluxCx.fillStyle = `rgba(255,255,255,${0.75 * alpha})`;
+          fluxCx.beginPath();
+          fluxCx.arc(
+            o.x - radius * 0.18,
+            o.y - radius * 0.18,
+            Math.max(1, radius * 0.14),
+            0,
+            Math.PI * 2
+          );
+          fluxCx.fill();
+        }
+
         fluxCx.restore();
       }
+
+      /* ---------- particules satellites ---------- */
+      for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+
+        p.x += p.vx;
+        p.y += p.vy;
+
+        p.vx *= 0.96;
+        p.vy *= 0.96;
+
+        p.life -= 0.03;
+
+        if (p.life <= 0) {
+          particles.splice(i, 1);
+          continue;
+        }
+
+        const c = COLOR[p.side];
+
+        fluxCx.save();
+        fluxCx.globalCompositeOperation = "lighter";
+        fluxCx.shadowColor = rgba(c, 1);
+        fluxCx.shadowBlur = 6;
+        fluxCx.fillStyle = rgba(c, p.life * 0.5);
+        fluxCx.beginPath();
+        fluxCx.arc(p.x, p.y, 1.8 + p.life * 2, 0, Math.PI * 2);
+        fluxCx.fill();
+        fluxCx.restore();
+      }
+
       // onde d'horizon : bitmap DPR (5 px CSS de haut), dessin en px CSS
       const wrect = waveCv.parentElement.getBoundingClientRect();
       waveW = Math.round(wrect.width);
