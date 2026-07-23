@@ -242,9 +242,21 @@ async function fetchHistory(beforeTs) {
   console.log(`Footprints M15 traités: ${gapCandles.length} ; POI détectés: ${newPois.length} (dont climax: ${newPois.filter((p) => p.climax).length})`);
 
   // --- vieillissement des nouveaux POI à travers la fenêtre construite ----
+  // Vieillissement optimisé, sémantique IDENTIQUE à updatePoiLifecycle :
+  // - départ à la bougie de création (les antérieures sont des no-ops prouvés :
+  //   candleTs < availableAt -> return poi inchangé) ;
+  // - arrêt au statut TERMINAL (INVALIDATED/MITIGATED : la fonction elle-même
+  //   court-circuite `TERMINAL.has(status) -> return poi`, poi-lifecycle.js:30).
+  // Sans cela : 35 k POI × 35 k bougies = ~1,2 Md d'appels avec allocation
+  // d'un objet gelé par bougie éligible (constaté : >1 h de GC sur BTC 2025).
   const age = (poi) => {
     let p = poi;
-    for (const c of gapCandles) p = B.updatePoiLifecycle(p, c, config);
+    let lo = 0, hi = gapCandles.length;
+    while (lo < hi) { const m = (lo + hi) >> 1; if (gapCandles[m].timestamp < p.createdTs) lo = m + 1; else hi = m; }
+    for (let i = lo; i < gapCandles.length; i++) {
+      p = B.updatePoiLifecycle(p, gapCandles[i], config);
+      if (p.status === "INVALIDATED" || p.status === "MITIGATED") break;
+    }
     return p;
   };
   const existingCreated = new Set(archive.pois.map((r) => Number(r[IDX.createdTs])));
