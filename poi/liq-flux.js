@@ -621,6 +621,11 @@
          est sans danger et rend le survol video/volume fonctionnel. */
       /* ecran au VRAI ratio de la video (640x360 = 16:9) sur toute la
          largeur du panneau : image complete, aucun recadrage */
+      /* ENCART VIDEO RETIRE (demande Meddy 2026-07-23) : les deux panneaux
+         descendent jusqu'en bas de page. Le bloc DOM reste (le cablage vol/
+         son/cinema s'y accroche sans risque) mais il est masque et la video
+         est dechargee au boot — zero bande passante, zero decodage. */
+      #gonLiqVideo { display:none !important; }
       #gonLiqVideo { position:relative; margin-top:auto; flex:0 0 auto; aspect-ratio:16/9;
         overflow:hidden; border-radius:0 0 5px 5px; }
       #gonLiqVideo video { display:block; width:100%; height:100%; object-fit:cover; }
@@ -719,6 +724,10 @@
     // son de la video : bouton mute + curseur de volume (persiste). Chrome
     // exige un geste utilisateur pour l'audio — clic et drag en sont.
     const vid = panel.querySelector("#gonLiqVideo video");
+    // encart masque -> ne pas telecharger/decoder la video pour rien
+    vid.autoplay = false;
+    vid.removeAttribute("src");
+    try { vid.load(); } catch (_) {}
     const snd = panel.querySelector("#gonLiqSnd");
     const vol = panel.querySelector("#gonLiqVol");
     try { vol.value = localStorage.getItem("gon.liq.vol") || "70"; } catch (_) {}
