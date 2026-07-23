@@ -375,11 +375,16 @@
         <button data-th="classic" title="Classique"></button>
         <button data-th="nuit" title="Nuit bleue"></button>
         <button data-th="ivoire" title="Ivoire"></button>
+        <button data-th="neon" title="Néon"></button>
+        <button data-th="emeraude" title="Émeraude"></button>
+        <button data-th="glace" title="Glace"></button>
       </div>
       <label>Fond <input type="color" id="thBg"></label>
       <label>Grille <input type="color" id="thGrid"></label>
       <label>Bougies hausse <input type="color" id="thUp"></label>
       <label>Bougies baisse <input type="color" id="thDown"></label>
+      <label>Outils achat <input type="color" id="thBull"></label>
+      <label>Outils vente <input type="color" id="thBear"></label>
       <button id="thReset">Réinitialiser</button>
     </div>
     <div id="apiban" hidden></div>
@@ -842,18 +847,30 @@ const volColor = (o, c) => c >= o ? volUp : volDn;   // pas de hexToRgba par bou
 const ts = () => chart.timeScale();
 
 /* ---------- thème du graphique (clic droit) ---------- */
+/* Chaque palette porte aussi la paire DIRECTIONNELLE des outils (bull=achat,
+   bear=vente) : carnet & profil, CVD, orbs de liquidation, dominance, sonar
+   et niveaux POI s'accordent dessus via l'événement gon:theme + CSS vars. */
 const THEMES = {
-  or:      { bg: '#060604', grid: '#12100a', up: '#d9b64d', down: '#111009', downLine: '#8a6d2f' },
-  classic: { bg: '#0e1117', grid: '#1c2432', up: '#26a69a', down: '#ef5350' },
-  nuit:    { bg: '#04070f', grid: '#0d1626', up: '#4d8fe0', down: '#c9556e' },
-  ivoire:  { bg: '#f4f0e6', grid: '#ded8c8', up: '#1e9e6a', down: '#d9534f' },
+  or:       { bg: '#060604', grid: '#12100a', up: '#d9b64d', down: '#111009', downLine: '#8a6d2f', bull: '#2f8bff', bear: '#ff2d5e' },
+  classic:  { bg: '#0e1117', grid: '#1c2432', up: '#26a69a', down: '#ef5350', bull: '#26a69a', bear: '#ef5350' },
+  nuit:     { bg: '#04070f', grid: '#0d1626', up: '#4d8fe0', down: '#c9556e', bull: '#4d8fe0', bear: '#c9556e' },
+  ivoire:   { bg: '#f4f0e6', grid: '#ded8c8', up: '#1e9e6a', down: '#d9534f', bull: '#1e9e6a', bear: '#d9534f' },
+  neon:     { bg: '#050208', grid: '#170b22', up: '#00e5ff', down: '#0d0512', downLine: '#c333a8', bull: '#00e5ff', bear: '#ff2bd6' },
+  emeraude: { bg: '#020a05', grid: '#0b1c11', up: '#2eea8c', down: '#081009', downLine: '#a03a35', bull: '#2eea8c', bear: '#ff5c5c' },
+  glace:    { bg: '#070b12', grid: '#101a28', up: '#8fd8ff', down: '#0b1018', downLine: '#e07a4a', bull: '#8fd8ff', bear: '#ff9660' },
 };
 let theme = { ...THEMES.or };
 let themeTimer = null;
 const lum = hex => { const n = parseInt(hex.slice(1), 16); return (.299 * (n >> 16 & 255) + .587 * (n >> 8 & 255) + .114 * (n & 255)) / 255; };
+const hexTriplet = hex => { const n = parseInt(hex.slice(1), 16); return `${n >> 16 & 255},${n >> 8 & 255},${n & 255}`; };
 function applyTheme(t, save = true) {
   theme = { ...t, downLine: t.downLine ?? t.down };   // downLine toujours défini pour les consommateurs
+  theme.bull = t.bull ?? '#2f8bff'; theme.bear = t.bear ?? '#ff2d5e';   // thèmes persistés pré-palette
   volUp = hexToRgba(theme.up, .35); volDn = hexToRgba(theme.downLine, .25);
+  // CSS vars : consommées par les panneaux (dominance, compteurs, journal…)
+  const rs = document.documentElement.style;
+  rs.setProperty('--gon-bull', theme.bull); rs.setProperty('--gon-bear', theme.bear);
+  rs.setProperty('--gon-bull-rgb', hexTriplet(theme.bull)); rs.setProperty('--gon-bear-rgb', hexTriplet(theme.bear));
   const light = lum(theme.bg) > .5;
   chart.applyOptions({
     layout: { background: { color: theme.bg }, textColor: light ? '#5a5346' : '#9d8a52' },
@@ -867,6 +884,7 @@ function applyTheme(t, save = true) {
     if (save) lsSet('orion-theme', JSON.stringify(theme));
   }, 150);
   $('thBg').value = theme.bg; $('thGrid').value = theme.grid; $('thUp').value = theme.up; $('thDown').value = theme.down;
+  if ($('thBull')) { $('thBull').value = theme.bull; $('thBear').value = theme.bear; }
   window.dispatchEvent(new CustomEvent('gon:theme', { detail: theme }));   // G-ON : hook thème pour la feature POI
 }
 
@@ -2321,6 +2339,8 @@ $('thBg').addEventListener('input', e => applyTheme({ ...theme, bg: e.target.val
 $('thGrid').addEventListener('input', e => applyTheme({ ...theme, grid: e.target.value }));
 $('thUp').addEventListener('input', e => applyTheme({ ...theme, up: e.target.value }));
 $('thDown').addEventListener('input', e => applyTheme({ ...theme, down: e.target.value, downLine: e.target.value }));
+$('thBull').addEventListener('input', e => applyTheme({ ...theme, bull: e.target.value }));
+$('thBear').addEventListener('input', e => applyTheme({ ...theme, bear: e.target.value }));
 $('thReset').onclick = () => applyTheme({ ...THEMES.or });
 wrap.addEventListener('contextmenu', e => {
   if (e.target.closest('#ctxMenu')) return;
@@ -2926,10 +2946,10 @@ if ('serviceWorker' in navigator && location.hostname.endsWith('github.io')) nav
 <script src="poi/poi-detector.js?v=3"></script>
 <script src="poi/poi-lifecycle.js?v=7"></script>
 <script src="poi/stream.js?v=1"></script>
-<script src="poi/poi-render.js?v=71"></script>
+<script src="poi/poi-render.js?v=72"></script>
 <script src="poi/poi-feature.js?v=46"></script>
-<script src="poi/liq-flux.js?v=31"></script>
-<script src="poi/whale-sonar.js?v=30"></script>
-<script src="poi/confluence.js?v=28"></script>
+<script src="poi/liq-flux.js?v=32"></script>
+<script src="poi/whale-sonar.js?v=31"></script>
+<script src="poi/confluence.js?v=29"></script>
 </body>
 </html>

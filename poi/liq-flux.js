@@ -20,7 +20,16 @@
   const STALL_MS = 180000;
   const ON_KEY = "gon.liq.on";
   const LONG = "long", SHORT = "short";
+  // Triplets rgb pilotés par la palette du chart (gon:theme) : longs brûlés
+  // = couleur VENTE (bear), shorts brûlés = couleur ACHAT (bull). Les CSS du
+  // panneau consomment les vars --gon-bull/--gon-bear posées par le chart.
   const COLOR = { long: [255, 45, 94], short: [47, 139, 255] };
+  const hexT = (h) => { const n = parseInt(h.slice(1), 16); return [n >> 16 & 255, n >> 8 & 255, n & 255]; };
+  const syncPalette = (t) => {
+    if (t && t.bear) COLOR.long = hexT(t.bear);
+    if (t && t.bull) COLOR.short = hexT(t.bull);
+  };
+  window.addEventListener("gon:theme", (e) => syncPalette(e.detail));
   const rgba = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
   // Teinte vers le blanc (coeur lumineux) — melange arithmetique, pas un degrade.
   const tint = (c, f) => [Math.round(c[0] + (255 - c[0]) * f), Math.round(c[1] + (255 - c[1]) * f), Math.round(c[2] + (255 - c[2]) * f)];
@@ -243,8 +252,7 @@
   }
 
   function addJournalRow(side, usd, at) {
-    const c = side === LONG ? "var(--liqlong, #ff2d5e)" : "var(--liqshort, #2f8bff)";
-    const cc = side === LONG ? "#ff2d5e" : "#2f8bff";
+    const cc = rgba(COLOR[side], 1);
     const row = document.createElement("div");
     row.className = "gonLiqEv";
     row.innerHTML = `<i style="background:${cc}; box-shadow:0 0 6px ${cc}"></i>` +
@@ -275,7 +283,7 @@
     if (tot > 50000) {
       const side = pl >= 0.5 ? "LONGS" : "SHORTS";
       domEls.pct.textContent = Math.round(Math.max(pl, 1 - pl) * 100) + "% " + side;
-      domEls.pct.style.color = pl >= 0.5 ? "rgba(255,45,94,.8)" : "rgba(47,139,255,.8)";
+      domEls.pct.style.color = rgba(COLOR[pl >= 0.5 ? "long" : "short"], 0.8);
     } else { domEls.pct.textContent = "—"; domEls.pct.style.color = ""; }
     // watchdog socket muette (les liqs tous-marches arrivent en continu)
     if (ws && ws.readyState === 1 && lastMsgAt && Date.now() - lastMsgAt > STALL_MS) ws.close();
@@ -336,13 +344,13 @@
          Le RAIL reste lisible meme a l'equilibre : directions teintees en
          fantome (rouge a gauche, bleu a droite) + pivot central dore. */
       #gonLiqDomBar { position:relative; height:4px; border-radius:2px;
-        background:linear-gradient(90deg, rgba(255,45,94,.22), rgba(20,19,14,.9) 42%,
-          rgba(20,19,14,.9) 58%, rgba(47,139,255,.22)); }
-      #gonLiqDomBar .l { position:absolute; right:50%; top:0; bottom:0; background:#ff2d5e;
-        border-radius:1px 0 0 1px; box-shadow:0 0 8px rgba(255,45,94,.55);
+        background:linear-gradient(90deg, rgba(var(--gon-bear-rgb,255,45,94),.22), rgba(20,19,14,.9) 42%,
+          rgba(20,19,14,.9) 58%, rgba(var(--gon-bull-rgb,47,139,255),.22)); }
+      #gonLiqDomBar .l { position:absolute; right:50%; top:0; bottom:0; background:var(--gon-bear,#ff2d5e);
+        border-radius:1px 0 0 1px; box-shadow:0 0 8px rgba(var(--gon-bear-rgb,255,45,94),.55);
         transition:width .4s ease; }
-      #gonLiqDomBar .s { position:absolute; left:50%; top:0; bottom:0; background:#2f8bff;
-        border-radius:0 1px 1px 0; box-shadow:0 0 8px rgba(47,139,255,.55);
+      #gonLiqDomBar .s { position:absolute; left:50%; top:0; bottom:0; background:var(--gon-bull,#2f8bff);
+        border-radius:0 1px 1px 0; box-shadow:0 0 8px rgba(var(--gon-bull-rgb,47,139,255),.55);
         transition:width .4s ease; }
       #gonLiqDomBar .n { position:absolute; left:50%; top:-4px; bottom:-4px; width:2px;
         margin-left:-1px; border-radius:1px; background:rgba(217,182,77,.75);
@@ -394,7 +402,8 @@
       #gonLiqPanel.light #gonLiqDomCap,
       #gonLiqPanel.light #gonLiqJournal .t { color:#726b4f; }
       #gonLiqPanel.light #gonLiqDomBar { background:linear-gradient(90deg,
-        rgba(255,45,94,.25), #e4e0d3 42%, #e4e0d3 58%, rgba(47,139,255,.25)); }
+        rgba(var(--gon-bear-rgb,255,45,94),.25), #e4e0d3 42%, #e4e0d3 58%,
+        rgba(var(--gon-bull-rgb,47,139,255),.25)); }
       /* fenetres etroites : le chart prime sur un panneau decoratif rigide */
       @media (max-width: 860px) { #gonLiqPanel, #gonLiqWave { display:none !important; } }
     `;
@@ -409,13 +418,13 @@
         <div class="sym" id="gonLiqSym"></div>
         <div class="gonLiqRule"><i></i></div>
       </div>
-      <div class="gonLiqCnt" style="color:#ff2d5e">
+      <div class="gonLiqCnt" style="color:var(--gon-bear,#ff2d5e)">
         <span class="num" id="gonLiqNumL">0.0</span><span class="unit">M</span>
-        <div class="cap" style="color:rgba(255,45,94,.55)">&#9660; LONGS BR&Ucirc;L&Eacute;S</div>
+        <div class="cap" style="color:rgba(var(--gon-bear-rgb,255,45,94),.55)">&#9660; LONGS BR&Ucirc;L&Eacute;S</div>
       </div>
-      <div class="gonLiqCnt" style="color:#2f8bff">
+      <div class="gonLiqCnt" style="color:var(--gon-bull,#2f8bff)">
         <span class="num" id="gonLiqNumS">0.0</span><span class="unit">M</span>
-        <div class="cap" style="color:rgba(47,139,255,.55)">&#9650; SHORTS BR&Ucirc;L&Eacute;S</div>
+        <div class="cap" style="color:rgba(var(--gon-bull-rgb,47,139,255),.55)">&#9650; SHORTS BR&Ucirc;L&Eacute;S</div>
       </div>
       <div id="gonLiqDomWrap">
         <div id="gonLiqDomBar"><div class="l" style="width:0"></div><div class="s" style="width:0"></div><div class="n"></div></div>
@@ -453,6 +462,7 @@
       panel.classList.toggle("light", isLight);
     };
     applyTheme();
+    syncPalette(gon.theme);   // etat initial (l'event ne rejoue pas le passe)
     window.addEventListener("gon:theme", applyTheme);
 
     // Pas de bouton de bascule (demande Meddy) : le panneau reste toujours

@@ -1,7 +1,8 @@
 /* G-ON — rendu POI sur canvas jumeau, aligne sur le chart Lightweight Charts de
  * G-Bot via ses convertisseurs natifs (series.priceToCoordinate + xOf).
  * Passe de design finale (spec DA) :
- * - hues directionnelles IMMUABLES : long #2f8bff / short #ff2d5e, seul alpha varie ;
+ * - hues directionnelles = PALETTE du chart (bull/bear via gon:theme, defauts
+ *   long #2f8bff / short #ff2d5e) ; l'alpha seul encode le score ;
  * - statut par MORPHOLOGIE du trait : plein=actif, tirete=touche, pointille=mort ;
  * - anti-collision bougies par CASING (gainage couleur-de-fond, 2 passes, crisp) ;
  * - chips monospace tabulaires (prix | score), caret vers le prix exact, connecteur
@@ -16,7 +17,10 @@
 (function () {
   "use strict";
 
-  const HUE = { long: [47, 139, 255], short: [255, 45, 94] };   // IMMUABLE
+  // Hues directionnelles pilotees par la PALETTE du chart (gon:theme) :
+  // long = couleur achat (bull), short = couleur vente (bear) — memes teintes
+  // que carnet/CVD/orbs/dominance. Defauts = canoniques bleu/rouge.
+  const HUE = { long: [47, 139, 255], short: [255, 45, 94] };
   // POI provisoire (bougie en cours) : vert long / rouge short — palette
   // distincte des definitifs pour lire "en formation" d'un coup d'oeil.
   const PROV_HUE = { long: [34, 197, 94], short: [239, 68, 68] };
@@ -116,7 +120,13 @@
       };
     }
     computeTheme();
-    const onTheme = () => { computeTheme(); mark(); };
+    function syncPalette() {
+      const t = gon.theme || {};
+      if (t.bull) HUE.long = hexToRgb(t.bull);
+      if (t.bear) HUE.short = hexToRgb(t.bear);
+    }
+    syncPalette();
+    const onTheme = () => { computeTheme(); syncPalette(); mark(); };
     window.addEventListener("gon:theme", onTheme);
 
     function size() {

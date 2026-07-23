@@ -22,7 +22,12 @@
   const WS_URL = "wss://fstream.binance.com/market/stream?streams=" +
     SYMS.map((s) => s.toLowerCase() + "@aggTrade").join("/");
   const STALL_MS = 25000;            // flux all-market : 25 s de silence = socket morte
-  const BUY = "#2f8bff", SELL = "#ff2d5e", GOLD = "#d9b64d";
+  // Paire directionnelle pilotée par la palette du chart (gon:theme).
+  let BUY = "#2f8bff", SELL = "#ff2d5e";
+  const GOLD = "#d9b64d";
+  const syncPalette = (t) => { if (t && t.bull) BUY = t.bull; if (t && t.bear) SELL = t.bear; };
+  syncPalette(window.__gon && window.__gon.theme);
+  window.addEventListener("gon:theme", (e) => syncPalette(e.detail));
   const ON_KEY = "gon.whale.on", SND_KEY = "gon.whale.snd", THR_KEY = "gon.whale.thr";
   const MIN_SAMPLES = 800, MAX_SAMPLES = 6000;
   const BURST_N = 3, BURST_WINDOW_MS = 5000, BURST_COOLDOWN_MS = 30000;

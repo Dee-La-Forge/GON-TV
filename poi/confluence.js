@@ -16,7 +16,13 @@
    * partage exactement l'echelle de la chart. Module independant : sa propre
    * socket depth ; lecture seule de __gonPoi (accumulator/config/pois). */
 
-  const BUY = "#2f8bff", SELL = "#ff2d5e", GOLD = "#d9b64d";
+  // Paire directionnelle pilotée par la palette du chart (gon:theme) : le
+  // carnet, le profil et le CVD s'accordent avec bougies/orbs/dominance.
+  let BUY = "#2f8bff", SELL = "#ff2d5e";
+  const GOLD = "#d9b64d";
+  const syncPalette = (t) => { if (t && t.bull) BUY = t.bull; if (t && t.bear) SELL = t.bear; };
+  syncPalette(window.__gon && window.__gon.theme);
+  window.addEventListener("gon:theme", (e) => syncPalette(e.detail));
   const ON_KEY = "gon.confl.on";
   const PANEL_W = 165;
   const WALL_MIN_USD = 1.5e6;          // plancher absolu d'un mur
