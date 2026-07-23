@@ -463,14 +463,21 @@
       const price = entryPrice != null ? entryPrice : oppPrice;
       // (elite est reporte sur le chip de droite via une pastille or)
       if (!active) {
-        // Niveaux MORTS : label CENTRE sur le niveau, au MILIEU de sa vie
-        // (naissance -> mort). Le centre = milieu de deux bougies FIXES, donc il
-        // glisse avec le graphe au scroll (stable). Si ce centre sort de l'ecran,
-        // on n'affiche pas le label (au lieu de le rabattre au bord = colonnes
-        // alignees, le defaut d'avant).
+        // Niveaux MORTS : label centre sur le MILIEU DE LA PARTIE VISIBLE de sa
+        // vie (audit 8). L'ancien centre-de-vie-ENTIERE sortait de l'ecran pour
+        // tout niveau historique a longue vie -> ZERO chip sur les vues
+        // profondes sub-M15 (constate des que l'IndexedDB a ouvert la
+        // navigation loin dans le passe). On borne dans [left,right] (portion
+        // visible du span) — ce n'est PAS le rabat-au-bord-d'ecran d'antan
+        // (colonnes alignees) : la borne varie avec chaque span, et si la
+        // portion visible est trop courte pour un chip lisible on garde
+        // l'ancien comportement (centre-vie ou rien).
         const cw = chipWidth(price, poi.score);
-        const cx = (x1 + x2) / 2;
-        if (cx < cw / 2 + 2 || cx > plotW - rightInset - cw / 2 - 2) return null;
+        let cx = (x1 + x2) / 2;
+        const lower = left + cw / 2 + 2;
+        const upper = Math.min(right, plotW - rightInset) - cw / 2 - 2;
+        if (upper >= lower) cx = Math.min(Math.max(cx, lower), upper);
+        else if (cx < cw / 2 + 2 || cx > plotW - rightInset - cw / 2 - 2) return null;
         drawChip(Math.round(cx - cw / 2), Math.round(y - TAG_H / 2), price, poi.score, hue, "dead", cw);
         if (centeredPrices) centeredPrices.add(price);
         return null;
