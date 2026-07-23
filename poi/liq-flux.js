@@ -331,18 +331,22 @@
       .gonLiqCnt .unit { font-size:13px; font-weight:300; opacity:.7; margin-left:3px; }
       .gonLiqCnt .cap { font-size:7px; letter-spacing:2px; margin-top:2px; }
       #gonLiqDomWrap { padding:8px 11px 10px; }
-      #gonLiqDomBar { position:relative; height:3px; background:#14130e; border-radius:1px; }
-      /* Balance (audit design) : zero AU CENTRE, chaque camp s'etend depuis le
-         centre vers SON bord, proportionnel a l'EXCEDENT net (50/50 = rien).
-         Longs (rouge) vers la gauche, shorts (bleu) vers la droite. */
+      /* Balance : zero AU CENTRE, chaque camp s'etend depuis le centre vers
+         SON bord, proportionnel a l'EXCEDENT net (50/50 = barres vides).
+         Le RAIL reste lisible meme a l'equilibre : directions teintees en
+         fantome (rouge a gauche, bleu a droite) + pivot central dore. */
+      #gonLiqDomBar { position:relative; height:4px; border-radius:2px;
+        background:linear-gradient(90deg, rgba(255,45,94,.22), rgba(20,19,14,.9) 42%,
+          rgba(20,19,14,.9) 58%, rgba(47,139,255,.22)); }
       #gonLiqDomBar .l { position:absolute; right:50%; top:0; bottom:0; background:#ff2d5e;
         border-radius:1px 0 0 1px; box-shadow:0 0 8px rgba(255,45,94,.55);
         transition:width .4s ease; }
       #gonLiqDomBar .s { position:absolute; left:50%; top:0; bottom:0; background:#2f8bff;
         border-radius:0 1px 1px 0; box-shadow:0 0 8px rgba(47,139,255,.55);
         transition:width .4s ease; }
-      #gonLiqDomBar .n { position:absolute; left:50%; top:-3px; bottom:-3px; width:1px;
-        background:rgba(217,182,77,.55); }
+      #gonLiqDomBar .n { position:absolute; left:50%; top:-4px; bottom:-4px; width:2px;
+        margin-left:-1px; border-radius:1px; background:rgba(217,182,77,.75);
+        box-shadow:0 0 6px rgba(217,182,77,.5); }
       #gonLiqDomCap { display:flex; justify-content:space-between; font-size:7px;
         letter-spacing:1.5px; color:#7d795f; margin-top:5px; }
       #gonLiqChan { flex:1; margin:0 11px; position:relative;
@@ -389,7 +393,8 @@
       #gonLiqPanel.light .gonLiqHead .sym,
       #gonLiqPanel.light #gonLiqDomCap,
       #gonLiqPanel.light #gonLiqJournal .t { color:#726b4f; }
-      #gonLiqPanel.light #gonLiqDomBar { background:#e4e0d3; }
+      #gonLiqPanel.light #gonLiqDomBar { background:linear-gradient(90deg,
+        rgba(255,45,94,.25), #e4e0d3 42%, #e4e0d3 58%, rgba(47,139,255,.25)); }
       /* fenetres etroites : le chart prime sur un panneau decoratif rigide */
       @media (max-width: 860px) { #gonLiqPanel, #gonLiqWave { display:none !important; } }
     `;
