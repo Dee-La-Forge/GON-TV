@@ -14,6 +14,9 @@
     minBodyFraction: 0.30,
     closeExtremeFraction: 0.65,
     directionalVolumePercentile: 55,
+    // ⚠ MORTE (audit 2026-07-23) : declaree et validee mais JAMAIS appliquee
+    // par le detecteur — la durcir ne change RIEN. Conservee pour compat de
+    // signature ; a rebrancher ou supprimer en connaissance de cause.
     minDirectionalVolumeShare: 0.35,
     seedVolumePercentile: 40,
     seedImbalance: 0.55,
@@ -30,6 +33,8 @@
     fallbackImbalance: 0.05,
     fallbackMinVolumeShare: 0.0001,
     keepOneExtremePoiPerCandle: true,
+    // ⚠ MORTE (audit 2026-07-23) : jamais lue par le detecteur, meme piege
+    // que minDirectionalVolumeShare.
     minFootprintBins: 1,
     minRetestGapCandles: 2,
     maxActivePois: 1000,

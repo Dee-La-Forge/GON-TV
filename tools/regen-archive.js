@@ -319,9 +319,12 @@ function skeleton(startMs) {
       lastPoiCloseMs: newRows.length ? newRows[newRows.length - 1][IDX.createdTs] : archive.sourceStats.lastPoiCloseMs
     },
     extension: {
-      note: SYMBOL === "BTCUSDT"
-        ? "Corpus original (strict, generateur Antho v1) jusqu'a extendedFromTs ; au-dela, extension par le detecteur JS live (parite prouvee par tools/parity-harness.js)."
-        : "Archive 100% detecteur JS live (aucun corpus canonique d'origine pour ce symbole) ; parite du detecteur prouvee sur BTCUSDT par tools/parity-harness.js.",
+      // Libelle audite (AUDIT_SCORING_2026-07-23) : la parite est CONDITIONNELLE
+      // (memes zones/scores quand le canonique emettait, n=11) ; le taux
+      // d'emission 96/jour est PAR CONCEPTION (allM15CandlePois). Le corpus
+      // canonique 2026-01->07 a ete REMPLACE par le detecteur JS (decision D1,
+      // commit 4837ebd) — l'archive est 100% detecteur JS pour tous les symboles.
+      note: "Archive 100% detecteur JS live (corpus canonique Antho v1 remplace le 2026-07-23, decision D1, AUDIT_SCORING_2026-07-23 ; original dans git). Parite par-POI conditionnelle (zones/scores) verifiee par tools/parity-harness.js ; emission 1 POI/bougie par conception.",
       extendedFromTs,
       extendedToTs: lastFp ? lastFp.endTs : oldValidAfter,
       extendedRows: (archive.extension ? Number(archive.extension.extendedRows) || 0 : 0) + newRows.length,

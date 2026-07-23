@@ -6,7 +6,8 @@
  * Complément de regen-archive.js (qui n'avance que la frontière AVANT) :
  * reconstruit les footprints M15 depuis `startDay` jusqu'au DÉBUT de la
  * couverture existante, détecte les POI avec le même détecteur JS (parité
- * prouvée par tools/parity-harness.js), les vieillit à travers la fenêtre
+ * par-POI conditionnelle — zones/scores — vérifiée par tools/parity-harness.js ;
+ * émission 1 POI/bougie par conception), les vieillit à travers la fenêtre
  * construite, puis les PRÉFIXE aux lignes existantes. Le corpus canonique
  * et la frontière avant (sourceStats.lastAggTradeMs, extension.*) restent
  * STRICTEMENT intacts — le regen quotidien continue tel quel.
@@ -299,7 +300,7 @@ async function fetchHistory(beforeTs) {
       retestedPois: allRows.length - activeCount
     }),
     backfillPast: {
-      note: "Extension ARRIÈRE par le détecteur JS live (parité prouvée par tools/parity-harness.js) ; corpus original et frontière avant intacts. Enchaîner backfill-invalidation avant publication (zombies 2025).",
+      note: "Extension ARRIÈRE par le détecteur JS live (parité par-POI conditionnelle vérifiée par tools/parity-harness.js ; émission 1 POI/bougie par conception) ; lignes existantes et frontière avant intactes. Enchaîner backfill-invalidation avant publication (zombies de fin de fenêtre).",
       coverageStartMs: START_MS,
       builtToTs: endMs,
       addedRows: ((archive.backfillPast && Number(archive.backfillPast.addedRows)) || 0) + newRows.length,

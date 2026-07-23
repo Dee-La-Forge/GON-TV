@@ -103,8 +103,25 @@
     return [...merged.values()].sort((a, b) => a.createdTs - b.createdTs);
   }
 
-  // Archive canonique Antho v1 (BTCUSDT uniquement) : ~9399 POI figes jusqu'a la
-  // frontiere d'export. Le live comble entre cette frontiere et maintenant.
+  // D2 : calibration glissante des scores (voir bloc dans loadAnthoV1Archive).
+  // poiScoreCal = histogramme (101 cases) des scores BRUTS des ~90 derniers
+  // jours d'archive, fige au chargement — calibre les POI detectes en live.
+  const POI_CAL_WINDOW_MS = 90 * 24 * 3600e3;
+  const POI_CAL_MIN = 1000;   // en-deca (10 premiers jours de 2025), score brut
+  let poiScoreCal = null;
+  function calibrateFresh(poi) {
+    // idempotent (scoreRaw marque un POI deja calibre — protege aussi les
+    // entrees de bootcache re-servies d'une session precedente)
+    if (!poi || poi.scoreRaw != null || !poiScoreCal) return poi;
+    const raw = Math.max(0, Math.min(100, Math.round(Number(poi.importanceScore ?? poi.score) || 0)));
+    let below = 0;
+    for (let k = 0; k < raw; k++) below += poiScoreCal.hist[k];
+    const cal = Math.round(100 * (below + 0.5 * poiScoreCal.hist[raw] + 0.5) / (poiScoreCal.total + 1));
+    return Object.assign({}, poi, { scoreRaw: raw, score: cal, importanceScore: cal, poiChargeScore: cal });
+  }
+
+  // Archive POI M15 : historique fige jusqu'a la frontiere d'export (regen
+  // quotidienne). Le live comble entre cette frontiere et maintenant.
   async function loadAnthoV1Archive(ticker, signal) {
     // Capture timeframeMs MAINTENANT : poiConfig peut passer a null si l'user
     // change de symbole pendant les retries -> deref null sinon (POI perdus).
@@ -183,6 +200,34 @@
       };
     }).filter((p) => Number.isFinite(p.createdTs) && Number.isFinite(p.zoneLow) && Number.isFinite(p.zoneHigh) && p.zoneHigh > p.zoneLow
       && Number.isFinite(p.score));   // score NaN -> POI jamais affiche (NaN>=min faux) : on l'exclut proprement
+    // D2 (AUDIT_SCORING_2026-07-23) : le score modele est un percentile GELE
+    // sur la population jan-avr 2026 -> son NIVEAU respire avec le regime de
+    // volatilite (FORT>=80 = 13-28 % des POI selon l'epoque). On re-exprime
+    // chaque score en PERCENTILE GLISSANT (90 j) de la population : ">=80" =
+    // top 20 % du regime courant, a toute epoque (mesure : 18,8-22,1 % par
+    // trimestre sur 2025-2026). Transformation monotone par fenetre (ordre
+    // local preserve a 99,9 %) ; le score modele brut reste dans scoreRaw.
+    // L'archive sur disque reste BRUTE — la calibration est un pur souci
+    // d'affichage, en un seul point.
+    {
+      const hist = new Array(101).fill(0);
+      let lo = 0, inWin = 0;
+      for (let i = 0; i < archivePois.length; i++) {
+        const p = archivePois[i];
+        const raw = Math.max(0, Math.min(100, Math.round(p.score)));
+        p.scoreRaw = raw;
+        while (lo < i && archivePois[lo].createdTs < p.createdTs - POI_CAL_WINDOW_MS) { hist[archivePois[lo].scoreRaw]--; inWin--; lo++; }
+        if (inWin >= POI_CAL_MIN) {
+          let below = 0;
+          for (let k = 0; k < raw; k++) below += hist[k];
+          const cal = Math.round(100 * (below + 0.5 * hist[raw] + 0.5) / (inWin + 1));
+          p.score = p.importanceScore = p.poiChargeScore = cal;
+        }
+        hist[raw] += 1; inWin += 1;
+      }
+      // fenetre de queue figee : sert a calibrer les POI detectes en LIVE
+      poiScoreCal = inWin >= POI_CAL_MIN ? { hist: hist.slice(), total: inWin } : null;
+    }
     // Audit 2026-07-22 : en panne GitHub le service worker sert la DERNIERE
     // archive encachee sans aucun signal — si elle date, le trou entre son
     // cutoff et la fenetre de bootstrap (24-48 h) est invisible. On alerte.
@@ -382,7 +427,7 @@
           if (!raw.complete || !raw.footprint) continue;    // retentera au prochain load
           const prior = poiHistory.filter((c) => c.startTs < candle.startTs);
           detected = B.detectPoi(raw.footprint, prior, poiConfig, Date.now());
-          if (detected) detected = decorateClimax(detected, raw.footprint, prior);
+          if (detected) detected = calibrateFresh(decorateClimax(detected, raw.footprint, prior));
           cache[key] = detected || null;
           fetched += 1;
           if (fetched % 4 === 0) saveBootCache(ticker, cache);
@@ -448,7 +493,7 @@
       ? Object.assign({}, footprint, { complete: true }) : footprint;
     if (!skipPartial && finalFp.startTs > poiHistoricalCutoff) {
       const detected = B.detectPoi(finalFp, priorHistory, poiConfig, Date.now());
-      if (detected && !pois.some((p) => p.id === detected.id)) pois.push(decorateClimax(detected, finalFp, priorHistory));
+      if (detected && !pois.some((p) => p.id === detected.id)) pois.push(calibrateFresh(decorateClimax(detected, finalFp, priorHistory)));
     }
     poiHistory = (skipPartial ? priorHistory : priorHistory.concat(finalFp)).sort((a, b) => a.startTs - b.startTs);
     trimPoiHistory();
@@ -537,7 +582,7 @@
     const snap = Object.assign({}, cur, { availableAt: nowTs, complete: true });
     const detected = B.detectPoi(snap, poiHistory, poiConfig, nowTs);
     if (!detected) { clearPoiProvisional(); return; }
-    const provPoi = Object.assign({}, decorateClimax(detected, cur, poiHistory), { provisional: true });
+    const provPoi = Object.assign({}, calibrateFresh(decorateClimax(detected, cur, poiHistory)), { provisional: true });
     // GARDE anti-croisement : un provisoire est HORS lifecycle (il ne meurt
     // jamais). Si le prix de sa PROPRE bougie en cours encadre la ligne d'entree
     // dessinee (low < entry < high), cette ligne serait tracee EN TRAVERS du
