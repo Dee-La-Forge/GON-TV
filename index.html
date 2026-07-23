@@ -371,12 +371,10 @@
     <div id="ctxMenu" hidden>
       <div class="cmTitle">Couleurs du graphique</div>
       <div class="cmPresets">
-        <button data-th="or" title="Noir & Or"></button>
+        <button data-th="gon" title="G-ON"></button>
         <button data-th="classic" title="Classique"></button>
         <button data-th="nuit" title="Nuit bleue"></button>
-        <button data-th="ivoire" title="Ivoire"></button>
         <button data-th="neon" title="Néon"></button>
-        <button data-th="emeraude" title="Émeraude"></button>
         <button data-th="glace" title="Glace"></button>
       </div>
       <label>Fond <input type="color" id="thBg"></label>
@@ -850,16 +848,16 @@ const ts = () => chart.timeScale();
 /* Chaque palette porte aussi la paire DIRECTIONNELLE des outils (bull=achat,
    bear=vente) : carnet & profil, CVD, orbs de liquidation, dominance, sonar
    et niveaux POI s'accordent dessus via l'événement gon:theme + CSS vars. */
+/* Toutes les palettes sont en BOUGIES PLEINES (corps rempli = mèche = bordure,
+   pas de downLine séparé) — demande Meddy 2026-07-23. Défaut = G-ON. */
 const THEMES = {
-  or:       { bg: '#060604', grid: '#12100a', up: '#d9b64d', down: '#111009', downLine: '#8a6d2f', bull: '#2f8bff', bear: '#ff2d5e' },
-  classic:  { bg: '#0e1117', grid: '#1c2432', up: '#26a69a', down: '#ef5350', bull: '#26a69a', bear: '#ef5350' },
-  nuit:     { bg: '#04070f', grid: '#0d1626', up: '#4d8fe0', down: '#c9556e', bull: '#4d8fe0', bear: '#c9556e' },
-  ivoire:   { bg: '#f4f0e6', grid: '#ded8c8', up: '#1e9e6a', down: '#d9534f', bull: '#1e9e6a', bear: '#d9534f' },
-  neon:     { bg: '#050208', grid: '#170b22', up: '#00e5ff', down: '#0d0512', downLine: '#c333a8', bull: '#00e5ff', bear: '#ff2bd6' },
-  emeraude: { bg: '#020a05', grid: '#0b1c11', up: '#2eea8c', down: '#081009', downLine: '#a03a35', bull: '#2eea8c', bear: '#ff5c5c' },
-  glace:    { bg: '#070b12', grid: '#101a28', up: '#8fd8ff', down: '#0b1018', downLine: '#e07a4a', bull: '#8fd8ff', bear: '#ff9660' },
+  gon:     { bg: '#060604', grid: '#12100a', up: '#2f8bff', down: '#ff2d5e', bull: '#2f8bff', bear: '#ff2d5e' },
+  classic: { bg: '#0e1117', grid: '#1c2432', up: '#26a69a', down: '#ef5350', bull: '#26a69a', bear: '#ef5350' },
+  nuit:    { bg: '#04070f', grid: '#0d1626', up: '#4d8fe0', down: '#c9556e', bull: '#4d8fe0', bear: '#c9556e' },
+  neon:    { bg: '#050208', grid: '#170b22', up: '#00e5ff', down: '#ff2bd6', bull: '#00e5ff', bear: '#ff2bd6' },
+  glace:   { bg: '#070b12', grid: '#101a28', up: '#8fd8ff', down: '#ff9660', bull: '#8fd8ff', bear: '#ff9660' },
 };
-let theme = { ...THEMES.or };
+let theme = { ...THEMES.gon };
 let themeTimer = null;
 const lum = hex => { const n = parseInt(hex.slice(1), 16); return (.299 * (n >> 16 & 255) + .587 * (n >> 8 & 255) + .114 * (n & 255)) / 255; };
 const hexTriplet = hex => { const n = parseInt(hex.slice(1), 16); return `${n >> 16 & 255},${n >> 8 & 255},${n & 255}`; };
@@ -2341,7 +2339,7 @@ $('thUp').addEventListener('input', e => applyTheme({ ...theme, up: e.target.val
 $('thDown').addEventListener('input', e => applyTheme({ ...theme, down: e.target.value, downLine: e.target.value }));
 $('thBull').addEventListener('input', e => applyTheme({ ...theme, bull: e.target.value }));
 $('thBear').addEventListener('input', e => applyTheme({ ...theme, bear: e.target.value }));
-$('thReset').onclick = () => applyTheme({ ...THEMES.or });
+$('thReset').onclick = () => applyTheme({ ...THEMES.gon });
 wrap.addEventListener('contextmenu', e => {
   if (e.target.closest('#ctxMenu')) return;
   e.preventDefault();
@@ -2808,8 +2806,8 @@ try {
   const st = JSON.parse(localStorage.getItem('orion-theme'));
   const okc = c => typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c);   // couleur stricte, pas juste truthy
   const valid = st && okc(st.bg) && okc(st.grid) && okc(st.up) && okc(st.down) && (st.downLine == null || okc(st.downLine));
-  applyTheme(valid ? st : { ...THEMES.or }, false);
-} catch { applyTheme({ ...THEMES.or }, false); }
+  applyTheme(valid ? st : { ...THEMES.gon }, false);
+} catch { applyTheme({ ...THEMES.gon }, false); }
 document.querySelectorAll('.tool[data-tip]').forEach(b => b.setAttribute('aria-label', b.dataset.tip));
 $('propKind').setAttribute('aria-label', 'Type de rectangle');
 $('propTf').setAttribute('aria-label', 'TF de la zone');
