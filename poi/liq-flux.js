@@ -196,16 +196,34 @@
           fluxCx.fillStyle = rgba(tint(c, 0.25), 0.45);
           fluxCx.beginPath(); fluxCx.arc(x, o.y, o.r * 0.55, 0, Math.PI * 2); fluxCx.fill();
         } else {
-          // QUEUE EFFILEE : segments a largeur et alpha degressifs (vraie comete,
-          // fini le gros trait uniforme). Longueur croissante avec r.
-          const tailLen = o.v * (16 + o.r * 1.2);
-          fluxCx.lineCap = "round";
-          for (let s = 4; s >= 0; s--) {
-            const f0 = s / 5, f1 = (s + 1) / 5, fade = (1 - f0) * (1 - f0);
-            fluxCx.strokeStyle = rgba(c, 0.40 * fade);
-            fluxCx.lineWidth = Math.max(0.8, o.r * 0.72 * (1 - f0));
+          // QUEUE-COMETE sur TRAJECTOIRE REELLE : historique de positions par
+          // orbe — la queue suit le chemin sinueux (sway compris) et trace
+          // du BON cote pour les deux sens (les shorts montent : l'ancienne
+          // queue geometrique pointait toujours vers le haut, faux pour eux).
+          // Effilage en easing quadratique sur 10-26 segments courts (fini le
+          // banding des 5 gros troncons) + coeur clair sur le dernier tiers.
+          o.trail = o.trail || [];
+          o.trail.push({ x, y: o.y });
+          const maxT = Math.round(10 + o.r * 0.9);
+          if (o.trail.length > maxT) o.trail.splice(0, o.trail.length - maxT);
+          const n = o.trail.length;
+          fluxCx.lineCap = "round"; fluxCx.lineJoin = "round";
+          for (let s = 1; s < n; s++) {
+            const t = s / n, tt = t * t;   // fine et diaphane au bout, pleine pres du corps
+            fluxCx.strokeStyle = rgba(c, 0.04 + 0.30 * tt);
+            fluxCx.lineWidth = Math.max(0.5, o.r * 0.60 * tt);
             fluxCx.beginPath();
-            fluxCx.moveTo(x, o.y - tailLen * f1); fluxCx.lineTo(x, o.y - tailLen * f0);
+            fluxCx.moveTo(o.trail[s - 1].x, o.trail[s - 1].y);
+            fluxCx.lineTo(o.trail[s].x, o.trail[s].y);
+            fluxCx.stroke();
+          }
+          for (let s = Math.max(1, n - Math.ceil(n / 3)); s < n; s++) {
+            const t = s / n, tt = t * t;
+            fluxCx.strokeStyle = rgba(tint(c, 0.55), 0.22 * tt);
+            fluxCx.lineWidth = Math.max(0.4, o.r * 0.20 * tt);
+            fluxCx.beginPath();
+            fluxCx.moveTo(o.trail[s - 1].x, o.trail[s - 1].y);
+            fluxCx.lineTo(o.trail[s].x, o.trail[s].y);
             fluxCx.stroke();
           }
           // CORPS en trois passes : halo large tres doux -> disque colore ->
