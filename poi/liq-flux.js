@@ -63,14 +63,16 @@
   function freeOrb(o) {
     for (let i = 0; i < o.trail.length; i++) freePt(o.trail[i]);
     o.trail.length = 0;
-    if (orbPool.length < 140) orbPool.push(o);
+    if (orbPool.length < 50) orbPool.push(o);
   }
   const freeParticle = (p) => { if (particlePool.length < 240) particlePool.push(p); };
 
   function createOrb(side, usd, dim = false) {
+    // PLUS PETIT (demande Meddy) : rampes reduites — max 26 px au lieu de 44,
+    // ambiance 2-4 px. Les flous/queues suivent le rayon : gros gain perf.
     const r = dim
-      ? Math.min(7, Math.max(3.5, (Math.log10(usd) - 3.3) * 1.7))
-      : Math.min(44, Math.max(5, (Math.log10(usd) - 4.1) * 10));
+      ? Math.min(4, Math.max(2, (Math.log10(usd) - 3.3) * 1.1))
+      : Math.min(26, Math.max(3.5, (Math.log10(usd) - 4.1) * 6));
 
     const w = fluxW || 130;
     const h = fluxH || 300;
@@ -95,7 +97,9 @@
     orb.sparkAt = 0;
     orb.pulse = Math.random() * 6.28;
     orb.amp = 2 + Math.random() * 4;
-    orb.maxTrail = Math.round(12 + r * 1.2);
+    // PERF : les orbes d'AMBIANCE (marche entier) n'ont pas de queue — seuls
+    // les meteores du symbole affiche paient le rendu riche.
+    orb.maxTrail = dim ? 0 : Math.round(12 + r * 1.2);
 
     orbs.push(orb);
 
@@ -154,7 +158,7 @@
     if (panelShown()) {
       // Rampe log ACCENTUEE (dans createOrb) : petites liq discretes, grosses
       // spectaculaires jusqu'a ~44 px + particules satellites au-dela de 5M$.
-      if (orbs.length < 140) {
+      if (orbs.length < 50) {
         createOrb(side, usd, false);
       }
       waves.push({ side, x: -60, v: 9 + Math.log10(usd), w: 30 + (Math.log10(usd) - 4) * 34 });
@@ -179,7 +183,7 @@
     // Autres symboles : petites boules d'AMBIANCE dans le canal uniquement —
     // tamisees, sans ping ni onde, hors compteurs/journal (qui restent la
     // verite du symbole affiche). Le canal vit au rythme du marche entier.
-    if (panelShown() && orbs.length < 140) {
+    if (panelShown() && orbs.length < 50) {
       createOrb(side, usd, true);   // dims en px CSS dans createOrb (audit retina conserve)
     }
   }
@@ -265,10 +269,10 @@
       // O(n^2) borne (<=140 orbes) avec rejet rapide par boite englobante.
       for (let i = 0; i < orbs.length; i++) {
         const a = orbs[i];
-        if (a.dying) continue;
+        if (a.dying || a.dim) continue;   // PERF : l'ambiance ne collisionne pas
         for (let j = i + 1; j < orbs.length; j++) {
           const b = orbs[j];
-          if (b.dying) continue;
+          if (b.dying || b.dim) continue;
           const dx = b.x - a.x, dy = b.y - a.y;
           const rs = (a.r + b.r) * 0.9;
           if (dx > rs || dx < -rs || dy > rs || dy < -rs) continue;
