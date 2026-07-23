@@ -188,11 +188,13 @@
         fluxCx.globalCompositeOperation = "lighter";
         if (o.dim) {
           // boule d'ambiance (autre symbole) : petit plasma doux, sans coeur ni
-          // queue — subordonnee aux liquidations du symbole courant.
-          fluxCx.shadowColor = rgba(c, 0.9); fluxCx.shadowBlur = 8 + o.r;
+          // queue — subordonnee aux liquidations du symbole courant. Halo
+          // PROPORTIONNEL au rayon (un flou fixe transforme les petites en
+          // patates floues).
+          fluxCx.shadowColor = rgba(c, 0.9); fluxCx.shadowBlur = 4 + o.r * 0.8;
           fluxCx.fillStyle = rgba(c, 0.30);
           fluxCx.beginPath(); fluxCx.arc(x, o.y, o.r, 0, Math.PI * 2); fluxCx.fill();
-          fluxCx.shadowBlur = 4;
+          fluxCx.shadowBlur = 2;
           fluxCx.fillStyle = rgba(tint(c, 0.25), 0.45);
           fluxCx.beginPath(); fluxCx.arc(x, o.y, o.r * 0.55, 0, Math.PI * 2); fluxCx.fill();
         } else {
@@ -228,17 +230,23 @@
           }
           // CORPS en trois passes : halo large tres doux -> disque colore ->
           // coeur teinte blanc + point speculaire. Le tout en additif.
-          fluxCx.shadowColor = rgba(c, 1); fluxCx.shadowBlur = 14 + o.r * 1.4;
+          // Halos PROPORTIONNELS au rayon : les petits orbes restent nets et
+          // denses (fini la patate floue), les gros gardent leur embrasement.
+          fluxCx.shadowColor = rgba(c, 1); fluxCx.shadowBlur = 6 + o.r * 1.6;
           fluxCx.fillStyle = rgba(c, 0.34);
           fluxCx.beginPath(); fluxCx.arc(x, o.y, o.r, 0, Math.PI * 2); fluxCx.fill();
-          fluxCx.shadowBlur = 8;
+          fluxCx.shadowBlur = 3 + o.r * 0.4;
           fluxCx.fillStyle = rgba(c, 0.55);
           fluxCx.beginPath(); fluxCx.arc(x, o.y, o.r * 0.72, 0, Math.PI * 2); fluxCx.fill();
-          fluxCx.shadowBlur = 5;
+          fluxCx.shadowBlur = 2 + o.r * 0.25;
           fluxCx.fillStyle = rgba(tint(c, 0.55), 0.85);
           fluxCx.beginPath(); fluxCx.arc(x, o.y, o.r * 0.42, 0, Math.PI * 2); fluxCx.fill();
-          fluxCx.shadowBlur = 0; fluxCx.fillStyle = "rgba(255,255,255,.85)";
-          fluxCx.beginPath(); fluxCx.arc(x, o.y - o.r * 0.22, Math.max(0.8, o.r * 0.16), 0, Math.PI * 2); fluxCx.fill();
+          // point speculaire : seulement au-dela de 6 px de rayon (en-deca il
+          // devient un pixel de bruit qui salit le petit orbe)
+          if (o.r >= 6) {
+            fluxCx.shadowBlur = 0; fluxCx.fillStyle = "rgba(255,255,255,.85)";
+            fluxCx.beginPath(); fluxCx.arc(x, o.y - o.r * 0.22, Math.max(0.8, o.r * 0.16), 0, Math.PI * 2); fluxCx.fill();
+          }
         }
         fluxCx.restore();
       }
