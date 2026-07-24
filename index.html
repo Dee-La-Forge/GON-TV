@@ -3274,15 +3274,30 @@ uiTip.id = 'uiTip';
 document.body.appendChild(uiTip);
 let uiTipTimer = 0, uiTipFor = null;
 function hideUiTip() { clearTimeout(uiTipTimer); uiTipTimer = 0; uiTipFor = null; uiTip.classList.remove('on'); }
+/* Conversion title -> data-tip, CENTRALE (revue 2) :
+   - nom accessible : uniquement pour les contrôles SANS texte visible (écraser
+     le texte visible cassait lecteur d'écran / contrôle vocal sur symBtn,
+     REPLAY…), et mis À JOUR à chaque re-pose (les toggles POI qui changent
+     leur libellé d'état ne figent plus un aria-label mensonger) ;
+   - un OBSERVER convertit toute RE-POSE de .title par un module (clic sur le
+     bolt/l'œil POI sans ressortir du bouton : la bulle native ressuscitait
+     après ~1 s de survol) — la voie paresseuse du mouseover reste pour les
+     éléments insérés avec title (innerHTML des panneaux). */
+function convertTitle(el) {
+  const t = el.getAttribute('title');
+  if (!t) return;
+  el.dataset.tip = t; el.removeAttribute('title');
+  if (!el.textContent.trim()) el.setAttribute('aria-label', t);
+}
+new MutationObserver(ms => ms.forEach(m => {
+  if (m.target && m.target.getAttribute && m.target.getAttribute('title')) convertTitle(m.target);
+})).observe(document.documentElement, { attributes: true, attributeFilter: ['title'], subtree: true });
 document.addEventListener('mouseover', e => {
   const el = e.target && e.target.closest ? e.target.closest('[data-tip], [title]') : null;
   if (!el || el === uiTipFor) return;
   hideUiTip();
   if (el.classList && el.classList.contains('tool')) return;   // tip CSS dédié de la barre d'outils
-  const t = el.getAttribute('title');
-  // revue : le title retiré était le seul NOM ACCESSIBLE de l'élément — on le
-  // miroite en aria-label (même pratique que les outils, l.3262)
-  if (t) { el.dataset.tip = t; el.removeAttribute('title'); if (!el.hasAttribute('aria-label')) el.setAttribute('aria-label', t); }
+  convertTitle(el);
   const txt = el.dataset.tip;
   if (!txt) return;
   uiTipFor = el;
@@ -3298,6 +3313,7 @@ document.addEventListener('mouseover', e => {
     let x = Math.max(6, Math.min(innerWidth - w - 6, r.left + r.width / 2 - w / 2));
     let y = r.bottom + 8;
     if (y + h > innerHeight - 6) y = r.top - h - 8;   // pas de place dessous : au-dessus
+    y = Math.max(6, y);   // revue 2 : petite fenêtre + bulle haute -> le repli au-dessus débordait du haut
     uiTip.style.left = x + 'px'; uiTip.style.top = y + 'px';
   }, 350);
 }, true);
@@ -3307,6 +3323,10 @@ document.addEventListener('mouseout', e => {
 document.addEventListener('mousedown', hideUiTip, true);
 document.addEventListener('wheel', hideUiTip, { capture: true, passive: true });
 document.addEventListener('keydown', hideUiTip, true);   // revue : Suppr peut retirer la cible sans aucun mouseout
+// revue 2 : Alt-Tab / vol de focus ne déclenche AUCUN mouseout — sur un écran
+// non surveillé, la bulle restait figée sur le chart pendant des heures.
+window.addEventListener('blur', hideUiTip);
+document.addEventListener('visibilitychange', hideUiTip);
 $('propKind').setAttribute('aria-label', 'Type de rectangle');
 $('propTf').setAttribute('aria-label', 'TF de la zone');
 $('propWidth').setAttribute('aria-label', 'Épaisseur du trait');
