@@ -128,6 +128,7 @@ const LUT_BRAISE = buildRamp([                            /* braise sous la cend
 const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
 const off = document.createElement('canvas'), octx = off.getContext('2d');
 const tmp = document.createElement('canvas'), tctx = tmp.getContext('2d');
+const prj = document.createElement('canvas'), prjx = prj.getContext('2d');
 function sizeOf(c) { const r = c.getBoundingClientRect(), d = devicePixelRatio||1;
   c.width = Math.round(r.width*d); c.height = Math.round(r.height*d);
   c.getContext('2d').setTransform(d,0,0,d,0,0); return [r.width, r.height]; }
@@ -235,15 +236,42 @@ function render() {
     const img = octx.createImageData(vis.length, rows), px = img.data;
     const dual = style === 'camps', braise = style === 'braise';
     const coolFrom = Math.max(1, vis.length - 96);        /* BRAISE : 4 dernières minutes à pleine chaleur */
+    const grid = new Float32Array(vis.length*rows);
     for (let i = 0; i < vis.length; i++) {
       const s = vis[i];
       const cool = braise && i < coolFrom ? .55 + .45*(i/coolFrom) : 1;
       for (const [k, v] of s.bins) {
         if (k < kLo || k > kHi) continue;
-        const L = braise ? LUT_BRAISE : dual ? ((k + .5)*binSize < s.mid ? LUT_BULL : LUT_BEAR) : LUT_OR;
-        const li = Math.min(255, Math.round(qOf(v)*cool*255))*4;
-        const o = ((kHi - k)*vis.length + i)*4;
-        px[o] = L[li]; px[o+1] = L[li+1]; px[o+2] = L[li+2]; px[o+3] = L[li+3];
+        grid[(kHi - k)*vis.length + i] = qOf(v)*cool;
+      }
+    }
+    let G = grid;
+    if (braise) {
+      /* feutrage des extrémités : chaque cellule diffuse une demi-teinte sur ses
+         voisines vides (H puis V) AVANT le lissage GPU — fini les coins cubiques */
+      const gh = new Float32Array(vis.length*rows);
+      for (let r = 0; r < rows; r++) {
+        const o = r*vis.length;
+        for (let i = 0; i < vis.length; i++)
+          gh[o+i] = Math.max(grid[o+i], .55*(i > 0 ? grid[o+i-1] : 0), .55*(i < vis.length-1 ? grid[o+i+1] : 0));
+      }
+      const gv = new Float32Array(vis.length*rows);
+      for (let r = 0; r < rows; r++) {
+        const o = r*vis.length, oU = (r-1)*vis.length, oD = (r+1)*vis.length;
+        for (let i = 0; i < vis.length; i++)
+          gv[o+i] = Math.max(gh[o+i], .45*(r > 0 ? gh[oU+i] : 0), .45*(r < rows-1 ? gh[oD+i] : 0));
+      }
+      G = gv;
+    }
+    for (let r = 0; r < rows; r++) {
+      const o = r*vis.length, k = kHi - r;
+      for (let i = 0; i < vis.length; i++) {
+        const q = G[o+i];
+        if (q <= 0) continue;
+        const L = braise ? LUT_BRAISE : dual ? ((k + .5)*binSize < vis[i].mid ? LUT_BULL : LUT_BEAR) : LUT_OR;
+        const li = Math.min(255, Math.round(q*255))*4;
+        const p2 = (o+i)*4;
+        px[p2] = L[li]; px[p2+1] = L[li+1]; px[p2+2] = L[li+2]; px[p2+3] = L[li+3];
       }
     }
     octx.putImageData(img, 0, 0);
@@ -255,12 +283,9 @@ function render() {
       ctx.drawImage(off, 0, 0, vis.length, rows, left, top, histW, plotH);
       ctx.globalAlpha = 1;
     } else if (braise) {
-      /* BRAISE : halo lissé + grain net par-dessus (2 drawImage du même buffer) */
+      /* BRAISE : halo lissé seul — la passe de grain net accusait les coins (retour Meddy) */
       ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
       ctx.drawImage(off, 0, 0, vis.length, rows, left, top, histW, plotH);
-      ctx.imageSmoothingEnabled = false; ctx.globalAlpha = .30;
-      ctx.drawImage(off, 0, 0, vis.length, rows, left, top, histW, plotH);
-      ctx.globalAlpha = 1;
     } else {
       /* SOIE / CAMPS / base FILAMENTS & CICATRICE : colonnes franches en X, fondu seulement en Y
          (étirement en 2 temps : X sans lissage, puis Y avec lissage GPU) */
@@ -479,15 +504,24 @@ function render() {
   ctx.beginPath(); ctx.moveTo(left + histW + .5, top); ctx.lineTo(left + histW + .5, bottom); ctx.stroke();
   ctx.setLineDash([]);
   {
-    const lastS = vis[vis.length - 1], rh2 = plotH/rows, dual2 = style === 'camps';
-    for (const [k, v] of lastS.bins) {
-      if (k < kLo || k > kHi) continue;
-      const q = qOf(v); if (q <= 0) continue;
+    const lastS = vis[vis.length - 1], dual2 = style === 'camps';
+    const lastQ = new Float32Array(rows);
+    for (const [k, v] of lastS.bins) if (k >= kLo && k <= kHi) lastQ[kHi - k] = qOf(v);
+    prj.width = 1; prj.height = rows;
+    const pimg = prjx.createImageData(1, rows), pd = pimg.data;
+    for (let r = 0; r < rows; r++) {
+      /* extrémités feutrées ici aussi : demi-teinte diffusée sur les paliers voisins */
+      const q = Math.max(lastQ[r], .45*(r > 0 ? lastQ[r-1] : 0), .45*(r < rows-1 ? lastQ[r+1] : 0));
+      if (q <= 0) continue;
+      const k = kHi - r;
       const L = style === 'braise' ? LUT_BRAISE : dual2 ? ((k + .5)*binSize < lastS.mid ? LUT_BULL : LUT_BEAR) : LUT_OR;
       const li = Math.min(255, Math.round(q*255))*4;
-      ctx.fillStyle = `rgba(${L[li]},${L[li+1]},${L[li+2]},${(L[li+3]/255)*.55})`;
-      ctx.fillRect(left + histW + 2, top + (kHi - k)*rh2, projW - 2, rh2 + .5);
+      const o = r*4;
+      pd[o] = L[li]; pd[o+1] = L[li+1]; pd[o+2] = L[li+2]; pd[o+3] = Math.round(L[li+3]*.55);
     }
+    prjx.putImageData(pimg, 0, 0);
+    ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(prj, 0, 0, 1, rows, left + histW + 2, top, projW - 2, plotH);
     ctx.fillStyle = '#7d795f'; ctx.font = '8px Segoe UI';
     ctx.fillText('EN AVANCE · carnet posé', left + histW + 6, top + 10);
   }
