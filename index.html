@@ -1000,6 +1000,17 @@ async function fillGapSec() {
     }
   } catch {} finally { gapFilling = false; }
 }
+/* Restauration de fenêtre APRÈS un prepend secondes : une fenêtre DÉGÉNÉRÉE
+   (< 30 seaux — cold start 2-3 bougies plein écran) n'est JAMAIS re-épinglée,
+   on recadre sur le direct à la place (fix 2026-07-24, vue figée constatée). */
+function restoreSecView(vr) {
+  const s = tfDef().sec;
+  if (vr && vr.to - vr.from >= 30 * s) { try { ts().setVisibleRange(vr); } catch {} }
+  else if (candles.length) {
+    const lt = candles[candles.length - 1].time;
+    try { ts().setVisibleRange({ from: lt - 150 * s, to: lt + 6 * s }); } catch {}
+  }
+}
 let lastGapReqSec = 0;
 function fillGapSecSoon() {   // throttle PROPRE aux secondes (ne pas partager avec fillGapSoon des klines)
   const n = Date.now();
@@ -1046,7 +1057,7 @@ async function deepenSec(seq) {   // garde seq : une boucle périmée (TF/symbol
       // + setData intégral à CHAQUE tour (jusqu'à 12 fois juste après le load,
       // pile pendant que l'utilisateur commence à lire) — l'ATR attend la fin.
       setAllDeferInd(candles);
-      if (vr) try { ts().setVisibleRange(vr); } catch {}
+      restoreSecView(vr);
     } catch { break; } finally { loadingOld = false; }
   }
 }
@@ -1081,7 +1092,7 @@ async function bridgeSec(seq, plan) {
     oldestDone = !!plan.atStart;
     if (candles.length > MAX_BARS) { candles = candles.slice(-MAX_BARS); firstTradeId = null; oldestDone = false; }
     setAllDeferInd(candles);
-    if (vr) try { ts().setVisibleRange(vr); } catch {}
+    restoreSecView(vr);
     persistBars();
   };
   secBridgeLive = plan;   // le scroll-back se clampe à la couture tant que la recouture vit
@@ -1113,7 +1124,7 @@ async function bridgeSec(seq, plan) {
         if (older.length) {
           const vr = ts().getVisibleRange();
           candles = older.concat(candles);
-          if (!joined) { setAllDeferInd(candles); if (vr) try { ts().setVisibleRange(vr); } catch {} }
+          if (!joined) { setAllDeferInd(candles); restoreSecView(vr); }
         }
       }
       if (joined) { junction(); return; }
@@ -1509,6 +1520,19 @@ async function load(keepZoom = false, attempt = 0) {
       setAll(candles);
       if (!keepZoom) ts().resetTimeScale();
       snapToLive();
+    }
+    // CADRE SAIN en secondes (fix 2026-07-24, constaté en réel sur BTC 15s) :
+    // la 1re page ne contient que ~2-3 seaux sur un symbole liquide —
+    // resetTimeScale les étirait PLEIN ÉCRAN (bougies géantes) et chaque
+    // restauration de fenêtre du deepen re-épinglait ce cadre dégénéré pour
+    // toujours (vue figée d'1 bougie de large, niveaux illisibles). On cadre
+    // d'emblée sur ~150 seaux : l'historique remplit l'espace en arrivant.
+    if (isSecTf() && candles.length) {
+      const vr0 = ts().getVisibleRange(), s0 = tfDef().sec;
+      if (!vr0 || vr0.to - vr0.from < 30 * s0) {
+        const lt = candles[candles.length - 1].time;
+        try { ts().setVisibleRange({ from: lt - 150 * s0, to: lt + 6 * s0 }); } catch {}
+      }
     }
     refreshTop();
     startWs();
@@ -3132,7 +3156,11 @@ setInterval(() => {
     // écrans du direct, l'utilisateur ÉTUDIE — le retour auto détruisait sa
     // position de lecture (30 s immobile = position perdue). Le retour auto
     // ne s'applique qu'au voisinage du direct (dérive involontaire).
-    if (n - 1 - lr.to > (lr.to - lr.from) * 3) return;
+    // GARDE (fix même jour, constaté en réel) : une fenêtre DÉGÉNÉRÉE
+    // (< 20 bougies — cold start secondes plein écran) n'est jamais une
+    // étude volontaire — sans ce plancher, l'inhibition bloquait le
+    // sauvetage d'une vue figée d'1 bougie de large, pour toujours.
+    if (lr.to - lr.from >= 20 && n - 1 - lr.to > (lr.to - lr.from) * 3) return;
     snapToLive();   // derniere bougie hors vue -> retour au direct
   } catch {}
 }, 2000);
