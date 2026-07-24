@@ -1149,6 +1149,51 @@ async function secArchDays() {
   }
   return (secArchIdx && secArchIdx.days && secArchIdx.days[symbol]) || [];
 }
+/* ---- enregistreur LOCAL (tools/sec-recorder.js) : le jour EN COURS capté en
+   WebSocket sur la machine et servi sur 127.0.0.1:8787 — comble le SEUL trou
+   que les archives ne couvrent pas (Vision publie à J+1), à zéro poids
+   Binance. Absent = silencieux (on n'insiste pas 5 min), repli archives/REST. */
+let secLocalDownUntil = 0;
+async function fetchOlderSecLocal() {
+  if (Date.now() < secLocalDownUntil || !candles.length) return undefined;
+  const seq = loadSeq, headT = candles[0].time;
+  let j = null;
+  try {
+    // targetAddressSpace loopback : requis par Chrome (Private Network Access)
+    // pour qu'une page HTTPS atteigne 127.0.0.1 ; ignoré par les navigateurs
+    // qui ne le connaissent pas.
+    const r = await fetch(`http://127.0.0.1:8787/sec/${symbol}`, { signal: AbortSignal.timeout(900), targetAddressSpace: 'loopback' });
+    if (r.ok) j = await r.json();
+  } catch {}
+  if (seq !== loadSeq || !ctxFresh()) return null;
+  if (!j || !Array.isArray(j.bars)) { secLocalDownUntil = Date.now() + 5 * 60e3; return undefined; }
+  if (!j.bars.length) return undefined;
+  // Contiguïté : le démon doit être VIVANT (flux < 20 s — un démon figé aurait
+  // un trou entre sa fin et la tête du chart) ; son suffixe servi est garanti
+  // sans trou interne (tout seau absent = vrai silence de marché) ; et il doit
+  // avoir du passé à offrir SOUS la tête.
+  if (!(j.liveMs && Date.now() - j.liveMs < 20000)) return undefined;
+  if (!(j.bars[0][0] < headT)) return undefined;
+  const out = [];   // roll-up 3 s -> TF courant, grille du chart
+  for (const b of j.bars) {
+    const bt = bucketStart(b[0]);
+    const last = out[out.length - 1];
+    if (last && last.time === bt) {
+      if (b[2] > last.high) last.high = b[2];
+      if (b[3] < last.low) last.low = b[3];
+      last.close = b[4]; last.volume += b[5];
+    } else out.push({ time: bt, open: b[1], high: b[2], low: b[3], close: b[4], volume: b[5] });
+  }
+  // même règle que les archives : tête partielle (coupe de page REST)
+  // REMPLACÉE par la version complète du démon, jamais fusionnée.
+  let bars;
+  const full = out.find(b => b.time === headT);
+  if (full && candles.length > 1) { candles = candles.slice(1); bars = out.filter(b => b.time <= headT); }
+  else bars = out.filter(b => b.time < headT);
+  if (!bars.length) return undefined;
+  firstTradeId = null;   // curseur REST re-seedé PAR TEMPS quand le démon s'épuise
+  return bars;
+}
 /* undefined = pas applicable (pas d'archive contiguë) → pagination REST ;
    null = réessayer plus tard ; sinon bougies du jour archivé, roll-up au TF
    courant (3 | 15 | 30 | 45 divisent 86400 : aucun seau à cheval sur minuit) */
@@ -3023,8 +3068,9 @@ async function loadOlder() {
   loadingOld = true;
   try {
     let older;
-    if (isSecTf()) {                             // secondes : jour archivé contigu d'abord (zéro poids), sinon REST
-      older = await fetchOlderSecArch();
+    if (isSecTf()) {                             // secondes : démon local (jour en cours) puis jour archivé (zéro poids), sinon REST
+      older = await fetchOlderSecLocal();
+      if (older === undefined) older = await fetchOlderSecArch();
       if (older === undefined) older = await fetchOlderSec();
       if (replay) return;
       if (older === OLDEST) { oldestDone = true; return; }
