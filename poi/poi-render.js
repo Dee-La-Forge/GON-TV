@@ -443,21 +443,25 @@
             // cluster en premier pouvait attraper une bougie AVANT la vraie
             // touche de zone) -> enveloppe cluster. Etages 2-3 elargis. Repli :
             // snapped = bougie CONTENANTE (FLOOR).
-            // Alignement visuel (Meddy 2026-07-24, mesure en reel 15s : 5/33
-            // fins ancrees sur une bougie qui ne TOUCHE PAS le prix trace —
-            // un hit de zone/cluster dans la fenetre exacte court-circuitait
-            // la recherche LIGNE elargie ; la ligne est dessinee a l'ENTRY et
-            // la meche s'arretait quelques dollars avant). PRIORITE ABSOLUE a
-            // une bougie qui intersecte la ligne tracee, fenetres de plus en
-            // plus larges ; la zone ne sert plus que de dernier repli.
+            // DOCTRINE D'ABORD (Meddy 2026-07-24, 2e passe) : la fenetre M15
+            // de la mort est l'evenement de VIE du niveau — la bougie de fin
+            // doit etre la VRAIE bougie de mitigation (chevauchement de zone)
+            // ou d'invalidation (traversee du cluster) DANS cette fenetre.
+            // Ordre dans la fenetre exacte : ligne (l'oeil la voit rejoindre
+            // le trait, epsilon IEEE754 en place) -> zone PURE -> enveloppe
+            // cluster. L'ELARGISSEMENT (±15/±45 min, ligne preferee pour
+            // l'oeil) ne sert QUE quand l'historique ne contient AUCUNE
+            // bougie de l'evenement (resolution d'archive M15, ~17 % des
+            // morts mesures) — jamais pour maquiller une fin dont la ligne
+            // n'a simplement pas trade : ce serait un autre evenement.
             let viaExact = true;
-            let r = seek(w0, w0 + W15, "line", true);
+            let r = seek(w0, w0 + W15, "line", true)
+              ?? seek(w0, w0 + W15, "zoneStrict", true)
+              ?? seek(w0, w0 + W15, "zone", true);
             if (r == null) {
               viaExact = false;
               r = seek(w0 - W15, w0 + 2 * W15, "line", false)
                 ?? seek(w0 - 3 * W15, w0 + 4 * W15, "line", false)
-                ?? seek(w0, w0 + W15, "zoneStrict", true)
-                ?? seek(w0, w0 + W15, "zone", true)
                 ?? seek(w0 - 3 * W15, w0 + 4 * W15, "zone", false);
             }
             v = r ?? snapped;

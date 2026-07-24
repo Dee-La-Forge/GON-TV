@@ -3060,9 +3060,13 @@ async function loadOlder() {
     if (!isSecTf() && older.length < Math.floor(KL_PAGE / (tfDef().fact || 1)) - 1) oldestDone = true;
   } catch {} finally { loadingOld = false; }
   // enchaînement (lot réussi, chemin nominal) : si la vue est toujours sous le
-  // seuil, lot suivant après 200 ms — s'arrête tout seul quand le tampon
-  // gauche est constitué (r.from repasse au-dessus du seuil) ou à oldestDone.
-  if (isSecTf()) { clearTimeout(oldRetryTimer); oldRetryTimer = setTimeout(loadOlder, 200); }
+  // seuil, lot suivant automatique — PACÉ 4 s (constaté en réel : à 200 ms,
+  // 10 pages/lot = poids 200 par seconde ≈ 12 000/min, le budget IP (2 400)
+  // crevait en ~20 s de scroll BTC → bandeau « Binance en pause » à répétition).
+  // Un geste utilisateur re-déclenche IMMÉDIATEMENT via l'événement de range ;
+  // seul l'enchaînement de fond est pacé. S'arrête seul (tampon constitué,
+  // oldestDone, plafond). Les jours archivés, eux, arrivent hors budget.
+  if (isSecTf()) { clearTimeout(oldRetryTimer); oldRetryTimer = setTimeout(loadOlder, 4000); }
 }
 ts().subscribeVisibleLogicalRangeChange(() => loadOlder());
 
@@ -3259,7 +3263,7 @@ if ('serviceWorker' in navigator && location.hostname.endsWith('github.io')) nav
 <script src="poi/poi-detector.js?v=3"></script>
 <script src="poi/poi-lifecycle.js?v=8"></script>
 <script src="poi/stream.js?v=1"></script>
-<script src="poi/poi-render.js?v=76"></script>
+<script src="poi/poi-render.js?v=77"></script>
 <script src="poi/poi-feature.js?v=47"></script>
 <script src="poi/liq-flux.js?v=42"></script>
 <script src="poi/whale-sonar.js?v=32"></script>
