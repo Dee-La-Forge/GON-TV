@@ -83,20 +83,22 @@ async function buildDayBars(csvPath, dayStartMs) {
     if (!line || line.startsWith("agg_trade_id")) continue;
     const c = line.split(",");
     const price = Number(c[1]), q = Number(c[2]), ts = Number(c[5]);
+    const sellerAggr = c[6] === "true" || c[6] === "True";   // isBuyerMaker -> le preneur VEND
     if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(q) || q <= 0 || !Number.isFinite(ts)) continue;
     if (ts < tsMin || ts > tsMax) { bad += 1; continue; }
     if (ts < dayStartMs || ts >= dayEndMs) continue;   // le dump ne déborde pas en pratique, ceinture
     const bt = Math.floor(ts / 1000 / SEC_TF) * SEC_TF;
+    const dq = sellerAggr ? -q : q;   // delta agresseur (feature delta 2026-07-24)
     const last = bars[bars.length - 1];
     if (last && last[0] === bt) {
       if (price > last[2]) last[2] = price;
       if (price < last[3]) last[3] = price;
-      last[4] = price; last[5] += q;
-    } else bars.push([bt, price, price, price, price, q]);
+      last[4] = price; last[5] += q; last[6] += dq;
+    } else bars.push([bt, price, price, price, price, q, dq]);
     n += 1;
   }
   if (bad > 0 && bad >= n) throw Error(`timestamps invraisemblables dans ${path.basename(csvPath)} (${bad} rejetés) — format Vision changé ?`);
-  for (const b of bars) b[5] = Math.round(b[5] * 1e3) / 1e3;   // volume à 3 décimales (taille fichier)
+  for (const b of bars) { b[5] = Math.round(b[5] * 1e3) / 1e3; b[6] = Math.round(b[6] * 1e3) / 1e3; }   // volume/delta à 3 décimales (taille fichier)
   return { bars, trades: n };
 }
 

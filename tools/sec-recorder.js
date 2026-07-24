@@ -46,17 +46,19 @@ fs.mkdirSync(DATA_DIR, { recursive: true });
 const S = {};
 for (const sym of SYMBOLS) S[sym] = { bars: [], la: 0, lastHoleSec: 0, dirty: false };
 
-function addTrade(sym, price, qty, tMs, aggId) {
+function addTrade(sym, price, qty, tMs, aggId, sellerAggr) {
   const st = S[sym];
   if (aggId <= st.la) return;                       // idempotent (recouture + live concurrents)
   const bt = Math.floor(tMs / 1000 / SEC_TF) * SEC_TF;
+  const dq = sellerAggr ? -qty : qty;   // delta agresseur (feature delta 2026-07-24)
   const bars = st.bars, last = bars[bars.length - 1];
   if (last && last[0] === bt) {
     if (price > last[2]) last[2] = price;
     if (price < last[3]) last[3] = price;
     last[4] = price; last[5] += qty;
+    if (last.length > 6) last[6] += dq;   // seau pre-delta (fichier ancien) : d reste inconnu
   } else if (!last || bt > last[0]) {
-    bars.push([bt, price, price, price, price, qty]);
+    bars.push([bt, price, price, price, price, qty, dq]);
   } else return;                                    // trade en retard sous le seau de tête : ignoré (jamais vu en pratique)
   st.la = aggId; st.dirty = true;
 }
@@ -107,7 +109,7 @@ async function catchup(sym) {
       tr = await r.json();
     } catch (e) { st.lastHoleSec = Math.ceil(Date.now() / 1000); console.log(`${sym}: recouture échouée (${e.message}) — trou marqué`); return; }
     if (!Array.isArray(tr) || !tr.length) return;   // à jour
-    for (const t of tr) addTrade(sym, +t.p, +t.q, +t.T, +t.a);
+    for (const t of tr) addTrade(sym, +t.p, +t.q, +t.T, +t.a, !!t.m);
     if (tr.length < 1000) return;                   // direct rejoint : contigu
   }
   // gap > 20 000 trades : trop cher — on repart du direct, le passé pré-arrêt est coupé par le trou
@@ -127,7 +129,7 @@ function connect() {
     lastMsgAt = Date.now();
     try {
       const d = JSON.parse(ev.data).data;
-      if (d && d.e === "aggTrade") addTrade(d.s, +d.p, +d.q, +d.T, +d.a);
+      if (d && d.e === "aggTrade") addTrade(d.s, +d.p, +d.q, +d.T, +d.a, !!d.m);
     } catch (_) {}
   };
   ws.onclose = () => {

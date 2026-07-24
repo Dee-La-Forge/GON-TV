@@ -227,6 +227,9 @@
     shown.long = 0; shown.short = 0;   // sinon les compteurs affichent des millions fantomes qui decroissent
     evList.textContent = "";
     symEl.textContent = sym;
+    resetOi();   // OI/funding/régime : historiques et hystérésis de l'ANCIEN symbole jetés
+    regPending = ""; regPendingN = 0; regShown = ""; regShownAt = 0; lastRegEval = 0;
+    if (oiEls.regime) { oiEls.regime.hidden = true; }
   }
 
   /* ---------- socket (discipline maison) ---------- */
@@ -552,11 +555,94 @@
     for (const child of evList.children) { child.style.opacity = a; a *= 0.65; }
   }
 
+  /* ---------- OI / funding / régime (proposition C, validée 2026-07-24) ----
+     Sondes légères : openInterest (poids 1) toutes les 10 s, premiumIndex
+     (poids 1 : mark + funding + prochain règlement) toutes les 30 s — via le
+     budget PARTAGÉ (gon.apiCool). Historiques 15 min en ring ; « — » tant que
+     la fenêtre n'est pas remplie. Régime = prix 15' x OI 15' x dominance :
+     SQUEEZE (positions forcées, fragile) vs AFFLUX (positionnement, construit). */
+  let oiHist = [], markHist = [], fundRate = null, fundNext = 0;
+  let lastOiPoll = 0, lastPremPoll = 0;
+  const oiEls = {};
+  function resetOi() { oiHist = []; markHist = []; fundRate = null; fundNext = 0; lastOiPoll = 0; lastPremPoll = 0; }
+  function histDelta(hist) {   // Δ% vs l'échantillon d'il y a >= 15 min (null si fenêtre incomplète)
+    const cut = Date.now() - 15 * 60e3;
+    let ref = null;
+    for (const h of hist) { if (h.t <= cut) ref = h; else break; }
+    if (!ref || !(ref.v > 0)) return null;
+    return (hist[hist.length - 1].v - ref.v) / ref.v * 100;
+  }
+  function pollOi() {
+    const n = Date.now();
+    if (gon && gon.apiCool && n < gon.apiCool.until()) return;   // budget partagé : on s'efface
+    const sym = curSymbol;
+    if (!sym) return;
+    if (n - lastOiPoll >= 10000) {
+      lastOiPoll = n;
+      fetch(`https://fapi.binance.com/fapi/v1/openInterest?symbol=${sym}`, { signal: AbortSignal.timeout(6000) })
+        .then((r) => { if (r.status === 429 || r.status === 418) { gon?.apiCool?.hit(r.headers.get("retry-after")); return null; } return r.ok ? r.json() : null; })
+        .then((j) => {
+          if (!j || sym !== curSymbol) return;
+          const v = Number(j.openInterest);
+          if (v > 0) { oiHist.push({ t: Date.now(), v }); if (oiHist.length > 120) oiHist.shift(); }
+        }).catch(() => {});
+    }
+    if (n - lastPremPoll >= 30000) {
+      lastPremPoll = n;
+      fetch(`https://fapi.binance.com/fapi/v1/premiumIndex?symbol=${sym}`, { signal: AbortSignal.timeout(6000) })
+        .then((r) => { if (r.status === 429 || r.status === 418) { gon?.apiCool?.hit(r.headers.get("retry-after")); return null; } return r.ok ? r.json() : null; })
+        .then((j) => {
+          if (!j || sym !== curSymbol) return;
+          const mp = Number(j.markPrice);
+          if (mp > 0) { markHist.push({ t: Date.now(), v: mp }); if (markHist.length > 60) markHist.shift(); }
+          fundRate = Number(j.lastFundingRate);
+          fundNext = Number(j.nextFundingTime) || 0;
+        }).catch(() => {});
+    }
+  }
+  // Régime avec HYSTÉRÉSIS (spec design) : affiché après 2 évaluations
+  // concordantes, tenu au moins 60 s — jamais de clignotement.
+  let regPending = "", regPendingN = 0, regShown = "", regShownAt = 0, lastRegEval = 0;
+  function renderOi(sums15) {
+    if (!oiEls.val) return;
+    const dOi = histDelta(oiHist), dPx = histDelta(markHist);
+    oiEls.val.textContent = dOi == null ? "—" : (dOi >= 0 ? "+" : "") + dOi.toFixed(1) + " % " + (dOi >= 0 ? "▲" : "▼");
+    oiEls.val.className = "v " + (dOi == null ? "" : dOi >= 0 ? "up" : "dn");
+    oiEls.fund.textContent = fundRate == null || !Number.isFinite(fundRate) ? "—"
+      : (fundRate >= 0 ? "+" : "") + (fundRate * 100).toFixed(4) + " %";
+    if (fundNext > Date.now()) {
+      const s = Math.floor((fundNext - Date.now()) / 1000);
+      oiEls.cd.textContent = s >= 3600 ? Math.floor(s / 3600) + "h" + String(Math.floor(s % 3600 / 60)).padStart(2, "0")
+        : String(Math.floor(s / 60)).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0");
+    } else oiEls.cd.textContent = "--:--";
+    // badge ABSENT tant que la fenêtre 15' n'est pas calculable (jamais un faux NEUTRE)
+    if (dPx == null || dOi == null) { oiEls.regime.hidden = true; regPending = ""; regPendingN = 0; return; }
+    oiEls.regime.hidden = false;
+    // seuils spec : prix ±0.25 %, OI ±0.8 %, dominance liqs >= 60 % sur >= 100 k$
+    const tot = sums15.long + sums15.short;
+    const domShorts = tot >= 100000 && sums15.short / tot >= 0.6;
+    const domLongs = tot >= 100000 && sums15.long / tot >= 0.6;
+    let want = "NEUTRE", cls = "";
+    if (dPx >= 0.25 && dOi <= -0.8 && domShorts) { want = "SQUEEZE SHORTS"; cls = "sqS"; }
+    else if (dPx <= -0.25 && dOi <= -0.8 && domLongs) { want = "SQUEEZE LONGS"; cls = "sqL"; }
+    else if (dOi >= 0.8 && Math.abs(dPx) >= 0.25) { want = "TENDANCE " + (dPx > 0 ? "▲" : "▼"); cls = "trend"; }
+    if (Date.now() - lastRegEval < 30000) return;   // cadence d'évaluation 30 s (2 concordantes = 60 s, spec)
+    lastRegEval = Date.now();
+    if (want === regPending) regPendingN += 1; else { regPending = want; regPendingN = 1; }
+    const held = Date.now() - regShownAt < 60000;
+    if (regPendingN >= 2 && want !== regShown && !held) {
+      regShown = want; regShownAt = Date.now();
+      oiEls.regime.textContent = want;
+      oiEls.regime.className = cls;
+    }
+  }
+
   /* ---------- tick lent : compteurs, dominance, symbole, watchdog ---------- */
   const shown = { long: 0, short: 0 };
   function slowTick() {
     if (gon.symbol && gon.symbol !== curSymbol) resetForSymbol(gon.symbol);
     const s = sums();
+    pollOi(); renderOi(s);   // bloc OI/funding/régime (proposition C)
     for (const side of [LONG, SHORT]) {
       shown[side] += (s[side] - shown[side]) * 0.25;
       numEls[side].textContent = (shown[side] / 1e6).toFixed(1);
@@ -626,6 +712,25 @@
       .gonLiqCnt .unit { font-size:13px; font-weight:300; opacity:.7; margin-left:3px; }
       .gonLiqCnt .cap { font-size:7px; letter-spacing:2px; margin-top:2px; }
       #gonLiqDomWrap { padding:8px 11px 10px; }
+      /* --- Bloc OI / funding / régime (proposition C, spec design 2026-07-24) :
+         LIGNES NUES au langage du panneau (hairline + espacement, jamais de
+         boîte), couleurs 100 % système bull/bear/or, NEUTRE quasi invisible. */
+      #gonOiWrap { padding:7px 11px 9px; border-top:1px solid rgba(217,182,77,.14); }
+      #gonOiWrap .oiRow { display:flex; justify-content:space-between; align-items:baseline; padding:2px 0; }
+      #gonOiWrap .oiRow .k { font-size:7px; letter-spacing:2px; color:#7d795f; }
+      #gonOiWrap .oiRow .v { font:600 11px Consolas, monospace; font-variant-numeric:tabular-nums; color:#cbb26a; }
+      #gonOiWrap .oiRow .v.up { color:var(--gon-bull,#2f8bff); }
+      #gonOiWrap .oiRow .v.dn { color:var(--gon-bear,#ff2d5e); }
+      #gonOiWrap .oiRow .v.fund { color:#f0d478; }
+      #gonRegime { margin-top:6px; height:16px; line-height:16px; text-align:center; font-size:9px;
+        font-weight:700; letter-spacing:2px; border-radius:3px; transition:background .4s, color .4s, box-shadow .4s;
+        color:#7d795f; background:transparent; border:1px solid rgba(217,182,77,.14); }
+      #gonRegime.sqS { color:#060604; border-color:transparent; background:var(--gon-bull,#2f8bff);
+        box-shadow:0 0 12px rgba(var(--gon-bull-rgb,47,139,255),.45); }
+      #gonRegime.sqL { color:#060604; border-color:transparent; background:var(--gon-bear,#ff2d5e);
+        box-shadow:0 0 12px rgba(var(--gon-bear-rgb,255,45,94),.45); }
+      #gonRegime.trend { color:#060604; border-color:transparent; background:#d9b64d;
+        box-shadow:0 0 10px rgba(217,182,77,.4); }
       /* Balance : zero AU CENTRE, chaque camp s'etend depuis le centre vers
          SON bord, proportionnel a l'EXCEDENT net (50/50 = barres vides).
          Le RAIL reste lisible meme a l'equilibre : directions teintees en
@@ -722,6 +827,13 @@
         <div id="gonLiqDomBar"><div class="l" style="width:0"></div><div class="s" style="width:0"></div><div class="n"></div></div>
         <div id="gonLiqDomCap"><span>DOMINANCE</span><span id="gonLiqPct">&mdash;</span></div>
       </div>
+      <div id="gonOiWrap">
+        <div class="oiRow" title="Variation de l'Open Interest (positions ouvertes) sur 15 min : il MONTE = du monde entre (mouvement construit), il FOND = des positions ferment ou sont liquid&eacute;es (nettoyage)">
+          <span class="k">OPEN INTEREST 15'</span><span class="v" id="gonOiVal">&mdash;</span></div>
+        <div class="oiRow" title="Taux de funding du perp et compte &agrave; rebours du prochain r&egrave;glement : positif = les longs paient (march&eacute; charg&eacute; long), n&eacute;gatif = les shorts paient">
+          <span class="k">FUNDING &middot; <span id="gonFundCd">--:--</span></span><span class="v fund" id="gonFundVal">&mdash;</span></div>
+        <div id="gonRegime" hidden title="Lecture crois&eacute;e prix + OI + liquidations : SQUEEZE = nettoyage de positions forc&eacute;es (fragile), TENDANCE = nouveau positionnement (construit), NEUTRE = rien &agrave; signaler">NEUTRE</div>
+      </div>
       <div id="gonLiqChan" title="Canal tous-march&eacute;s : chaque orbe = une liquidation en direct. M&eacute;t&eacute;ores brillants = symbole affich&eacute;, petites boules = autres march&eacute;s. Descend = longs, monte = shorts."><canvas></canvas></div>
       <div id="gonLiqJournal" title="Journal : liquidations &ge; 250 k$ du symbole affich&eacute;, heure locale"><div class="t">JOURNAL</div><div id="gonLiqEvList"></div></div>
       <div id="gonLiqVideo">
@@ -745,6 +857,10 @@
       pct: document.getElementById("gonLiqPct") };
     evList = document.getElementById("gonLiqEvList");
     symEl = document.getElementById("gonLiqSym");
+    oiEls.val = document.getElementById("gonOiVal");
+    oiEls.fund = document.getElementById("gonFundVal");
+    oiEls.cd = document.getElementById("gonFundCd");
+    oiEls.regime = document.getElementById("gonRegime");
 
     // THEME : bascule la classe .light du panneau (tons neutres uniquement) au
     // rythme de l'evenement gon:theme emis par G-Bot. isLight sert aussi a la

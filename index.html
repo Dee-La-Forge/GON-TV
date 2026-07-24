@@ -882,6 +882,7 @@ function updateInd(prev, bar, isNew) {   // O(1) : ne touche que la dernière bo
   }
 }
 let volUp, volDn;   // posées par applyTheme (qui tourne au boot AVANT toute donnée) — pas de littéraux fantômes
+let volDeltaUp = [], volDeltaDn = [];   // 8 paliers d'intensité par camp agresseur (delta), reposés par thème
 const volColor = (o, c) => c >= o ? volUp : volDn;   // pas de hexToRgba par bougie (50k allocations/tranche)
 const ts = () => chart.timeScale();
 
@@ -916,6 +917,14 @@ function applyTheme(t, save = true) {
   rs.setProperty('--gon-bull', theme.bull); rs.setProperty('--gon-bear', theme.bear);
   rs.setProperty('--gon-bull-rgb', hexTriplet(theme.bull)); rs.setProperty('--gon-bear-rgb', hexTriplet(theme.bear));
   const light = lum(theme.bg) > .5;
+  // LUT delta (spec design) : alphas sombre .18->.80 / clair .30->.85 selon la
+  // luminance du fond — teintes up/down INCHANGÉES (l'alpha seul module).
+  volDeltaUp = []; volDeltaDn = [];
+  for (let q = 0; q <= 24; q++) {
+    const a = light ? .30 + .55 * q / 24 : .18 + .62 * q / 24;
+    volDeltaUp.push(hexToRgba(theme.up, a));
+    volDeltaDn.push(hexToRgba(theme.downLine, a));
+  }
   chart.applyOptions({
     layout: { background: { color: theme.bg }, textColor: light ? '#5a5346' : '#9d8a52' },
     grid: { vertLines: { color: theme.grid }, horzLines: { color: theme.grid } },
@@ -943,7 +952,12 @@ function toast(msg) {
   const t = $('toast'); t.textContent = msg; t.style.opacity = 1;
   setTimeout(() => t.style.opacity = 0, 3000);
 }
-const mapK = x => ({ time: x[0] / 1000, open: +x[1], high: +x[2], low: +x[3], close: +x[4], volume: +x[5] });
+/* d = DELTA agresseur (achat − vente) — klines : col.9 = volume taker BUY natif
+   Binance, donc delta exact = 2·buy − total. Bougie sans info -> d absent
+   (vieux caches, archives pré-delta) : le volume retombe sur la couleur
+   directionnelle classique. (Feature delta/absorption 2026-07-24.) */
+const mapK = x => ({ time: x[0] / 1000, open: +x[1], high: +x[2], low: +x[3], close: +x[4], volume: +x[5],
+  ...(Number.isFinite(+x[9]) ? { d: 2 * (+x[9]) - (+x[5]) } : {}) });
 const AGGT = 'https://fapi.binance.com/fapi/v1/aggTrades';
 function rollup(bars) {   // agrège des bougies SOURCE en seaux du TF courant (fact > 1)
   const d = tfDef();
@@ -956,7 +970,9 @@ function rollup(bars) {   // agrège des bougies SOURCE en seaux du TF courant (
       if (b.high > last.high) last.high = b.high;
       if (b.low < last.low) last.low = b.low;
       last.close = b.close; last.volume += b.volume;
-    } else out.push({ time: bt, open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume });
+      if (last.d !== undefined && b.d !== undefined) last.d += b.d; else delete last.d;   // delta : somme si COMPLET, sinon inconnu
+    } else out.push({ time: bt, open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume,
+      ...(b.d !== undefined ? { d: b.d } : {}) });
   }
   return out;
 }
@@ -968,16 +984,17 @@ async function fetchK(extra, limitAgg, ms) {
   if (!Array.isArray(k)) return k;
   return rollup(k.map(mapK));
 }
-function tradesToBars(trades) {   // TF secondes : seaux construits depuis les aggTrades
+function tradesToBars(trades) {   // TF secondes : seaux construits depuis les aggTrades (m = vendeur agresseur)
   const out = [];
   for (const t of trades) {
     const price = +t.p, q = +t.q, bt = bucketStart(t.T / 1000);
+    const dq = t.m ? -q : q;   // delta agresseur : m=true -> le PRENEUR vend
     const last = out[out.length - 1];
     if (last && last.time === bt) {
       if (price > last.high) last.high = price;
       if (price < last.low) last.low = price;
-      last.close = price; last.volume += q;
-    } else out.push({ time: bt, open: price, high: price, low: price, close: price, volume: q });
+      last.close = price; last.volume += q; last.d += dq;
+    } else out.push({ time: bt, open: price, high: price, low: price, close: price, volume: q, d: dq });
   }
   return out;
 }
@@ -1004,7 +1021,8 @@ function applyTrades(tr) {   // paquet de trades → quelques applyBar par SEAU 
   for (const b of bars) {
     const last = candles[candles.length - 1];
     if (last && b.time === last.time)
-      applyBar({ time: b.time, open: last.open, high: Math.max(last.high, b.high), low: Math.min(last.low, b.low), close: b.close, volume: last.volume + b.volume });
+      applyBar({ time: b.time, open: last.open, high: Math.max(last.high, b.high), low: Math.min(last.low, b.low), close: b.close, volume: last.volume + b.volume,
+        ...(last.d !== undefined && b.d !== undefined ? { d: last.d + b.d } : {}) });
     else applyBar(b);
   }
   lastTradeMs = tr[tr.length - 1].T;
@@ -1073,6 +1091,7 @@ async function deepenSec(seq) {   // garde seq : une boucle périmée (TF/symbol
         head.open = lastNew.open;
         if (lastNew.high > head.high) head.high = lastNew.high;
         if (lastNew.low < head.low) head.low = lastNew.low;
+        if (head.d !== undefined && lastNew.d !== undefined) head.d += lastNew.d; else delete head.d;
         head.volume += lastNew.volume; older.pop();
       }
       if (!older.length) continue;
@@ -1107,6 +1126,7 @@ async function bridgeSec(seq, plan) {
       head.open = pl.open;
       if (pl.high > head.high) head.high = pl.high;
       if (pl.low < head.low) head.low = pl.low;
+      if (head.d !== undefined && pl.d !== undefined) head.d += pl.d; else delete head.d;
       head.volume += pl.volume; pre.pop();
     }
     while (pre.length && head && pre[pre.length - 1].time >= head.time) pre.pop();   // sanité : jamais de chevauchement
@@ -1144,7 +1164,8 @@ async function bridgeSec(seq, plan) {
           head.open = lastNew.open;
           if (lastNew.high > head.high) head.high = lastNew.high;
           if (lastNew.low < head.low) head.low = lastNew.low;
-          head.volume += lastNew.volume; older.pop();
+          if (head.d !== undefined && lastNew.d !== undefined) head.d += lastNew.d; else delete head.d;
+        head.volume += lastNew.volume; older.pop();
         }
         if (older.length) {
           const vr = ts().getVisibleRange();
@@ -1209,7 +1230,9 @@ async function fetchOlderSecLocal() {
       if (b[2] > last.high) last.high = b[2];
       if (b[3] < last.low) last.low = b[3];
       last.close = b[4]; last.volume += b[5];
-    } else out.push({ time: bt, open: b[1], high: b[2], low: b[3], close: b[4], volume: b[5] });
+      if (last.d !== undefined && Number.isFinite(b[6])) last.d += b[6]; else delete last.d;
+    } else out.push({ time: bt, open: b[1], high: b[2], low: b[3], close: b[4], volume: b[5],
+      ...(Number.isFinite(b[6]) ? { d: b[6] } : {}) });
   }
   // même règle que les archives : tête partielle (coupe de page REST)
   // REMPLACÉE par la version complète du démon, jamais fusionnée.
@@ -1251,7 +1274,9 @@ async function fetchOlderSecArch() {
       if (b[2] > last.high) last.high = b[2];
       if (b[3] < last.low) last.low = b[3];
       last.close = b[4]; last.volume += b[5];
-    } else out.push({ time: bt, open: b[1], high: b[2], low: b[3], close: b[4], volume: b[5] });
+      if (last.d !== undefined && Number.isFinite(b[6])) last.d += b[6]; else delete last.d;
+    } else out.push({ time: bt, open: b[1], high: b[2], low: b[3], close: b[4], volume: b[5],
+      ...(Number.isFinite(b[6]) ? { d: b[6] } : {}) });
   }
   // Tête de candles possiblement PARTIELLE (coupe de page REST) : si son seau
   // appartient au jour archivé, l'archive détient la version COMPLÈTE — elle
@@ -1308,13 +1333,26 @@ async function fetchOlderSec() {
   if (!trades.length) return null;   // rien de nouveau dans ce lot : retentera depuis le curseur avancé
   return tradesToBars(trades);
 }
-function applyTrade(price, q, tSec) {   // un trade → le seau courant (créé au besoin)
+function applyTrade(price, q, tSec, m) {   // un trade → le seau courant (créé au besoin) ; m = vendeur agresseur
   const last = candles[candles.length - 1];
   const bt = bucketStart(tSec);
-  if (!last || bt > last.time) applyBar({ time: bt, open: price, high: price, low: price, close: price, volume: q });
-  else if (bt === last.time) applyBar({ time: bt, open: last.open, high: Math.max(last.high, price), low: Math.min(last.low, price), close: price, volume: last.volume + q });
+  const dq = m ? -q : q;
+  if (!last || bt > last.time) applyBar({ time: bt, open: price, high: price, low: price, close: price, volume: q, d: dq });
+  else if (bt === last.time) applyBar({ time: bt, open: last.open, high: Math.max(last.high, price), low: Math.min(last.low, price), close: price, volume: last.volume + q,
+    ...(last.d !== undefined ? { d: last.d + dq } : {}) });
 }
-const volOf = b => ({ time: b.time, value: b.volume, color: volColor(b.open, b.close) });
+/* A — volume coloré par le CAMP AGRESSEUR (delta). Spec design 2026-07-24 :
+   MÊMES teintes up/down que le volume historique (l'alpha SEUL module, jamais
+   la teinte — grammaire de l'app), saturation à 60 % de déséquilibre (une
+   bougie 80/20 = intensité pleine), 25 paliers PRÉCALCULÉS par thème (zéro
+   allocation par bougie). Bougie sans delta : couleur historique inchangée. */
+const volOf = b => {
+  if (b.d !== undefined && b.volume > 0) {
+    const q = Math.min(24, Math.round(Math.min(1, Math.abs(b.d) / b.volume / 0.6) * 24));
+    return { time: b.time, value: b.volume, color: (b.d >= 0 ? volDeltaUp : volDeltaDn)[q] };
+  }
+  return { time: b.time, value: b.volume, color: volColor(b.open, b.close) };
+};
 
 /* pipeline commun : (re)pose les deux séries + indicateur ; fusionne une bougie entrante */
 function postSeries(arr) { series.setData(arr); volSeries.setData(arr.map(volOf)); }
@@ -1367,7 +1405,7 @@ function applyBar(bar) {
     // trou (veille, coupure) → rattrapage REST ; en secondes, un trou = absence de trades : on appende
     if (bar.time > barEnd(last.time) && !isSecTf()) { fillGap(); return; }
     candles.push(bar); isNew = true;
-    bucketVols.clear();   // nouveau seau de tête : les volumes source du précédent ne doivent JAMAIS s'y sommer
+    bucketVols.clear(); bucketDels.clear();   // nouveau seau de tête : les volumes source du précédent ne doivent JAMAIS s'y sommer
     if (candles.length > MAX_BARS + 1000) {
       candles = candles.slice(-MAX_BARS);
       if (isSecTf()) firstTradeId = null;   // curseur de tête rasé : fetchOlderSec le re-seede PAR TEMPS au prochain scroll-back (plus de gel)
@@ -1443,7 +1481,7 @@ async function fillGap() {
         if (b.time === last.time) { candles[candles.length - 1] = b; series.update(b); volSeries.update(volOf(b)); }
         else if (b.time > last.time) { candles.push(b); series.update(b); volSeries.update(volOf(b)); }
       });
-      bucketVols.clear();   // le seau de tête vient d'être reconstruit depuis la source
+      bucketVols.clear(); bucketDels.clear();   // le seau de tête vient d'être reconstruit depuis la source
       if (candles.length > MAX_BARS + 1000) { candles = candles.slice(-MAX_BARS); oldestDone = false; setAll(candles); }   // tête rasée : la genèse n'est plus en mémoire (audit)
       // page pleine = KL_PAGE/fact seaux — comparer aux SEAUX, pas aux bougies source
       if (k.length < Math.floor(KL_PAGE / (tfDef().fact || 1)) - 1) break;
@@ -1549,7 +1587,7 @@ async function load(keepZoom = false, attempt = 0) {
     if (seq !== loadSeq || replay) return;   // supplanté par un autre load ou par un replay entré entre-temps
     if (!Array.isArray(k) || !k.length) { toast(`Binance Futures : ${(k && k.msg) || 'aucune donnée pour ce symbole'}`); retry(); return; }
     candles = k;
-    bucketVols = new Map();
+    bucketVols = new Map(); bucketDels = new Map();
     dataCtx = symbol + '|' + tf;
     // TF agrégés (4m, 8m…) : le premier fetch plafonné à 1500 bougies SOURCE peut être court →
     // approfondissement en pages PARALLÈLES jusqu'à ~500 seaux avant d'afficher (une seule transition)
@@ -1627,6 +1665,7 @@ async function load(keepZoom = false, attempt = 0) {
 
 let pollTimer = null, reconnectTimer = null, staleTimer = null, lastMsgAt = 0;
 let bucketVols = new Map();   // volumes des bougies source du seau courant (WS kline agrégé)
+let bucketDels = new Map();   // jumeau DELTA de bucketVols (somme si toutes les sources le portent)
 function stopWs() {
   if (ws) { try { ws.close(); } catch {} ws = null; }   // pas de reconnexion : loadSeq a déjà tourné
   clearInterval(pollTimer); pollTimer = null;
@@ -1748,7 +1787,7 @@ function startWs(attempt = 0) {
         const p = +d.p, tt = d.T / 1000, last = candles[candles.length - 1];
         if (isSecTf()) {
           if (lastAggId && d.a > lastAggId + 1) { if (!gapFilling) fillGapSec(); }   // trou d'ids : rattrapage REST IMMÉDIAT (idempotent, non throttlé, gardé par gapFilling) — pas d'apply inline (double-compte)
-          else if (d.a > lastAggId) { applyTrade(p, +d.q, tt); lastTradeMs = d.T; lastAggId = d.a; }   // idempotent : blindé contre un re-délivrage (reconnexion, proxy)
+          else if (d.a > lastAggId) { applyTrade(p, +d.q, tt, d.m); lastTradeMs = d.T; lastAggId = d.a; }   // idempotent : blindé contre un re-délivrage (reconnexion, proxy)
         }
         // borne haute : un trade de la bougie SUIVANTE ne doit jamais réécrire la bougie clôturée
         else if (tt >= last.time && tt < barEnd(last.time)) {
@@ -1760,7 +1799,9 @@ function startWs(attempt = 0) {
         } else if (tt >= barEnd(last.time)) fillGapSoon();   // kline muet mais trades vivants → rattrapage REST
       } else if (!isSecTf()) {
         const k = d.k;
-        const sb = { time: k.t / 1000, open: +k.o, high: +k.h, low: +k.l, close: +k.c, volume: +k.v };
+        // delta live des klines : V = volume taker BUY du flux -> d = 2·V − v
+        const sb = { time: k.t / 1000, open: +k.o, high: +k.h, low: +k.l, close: +k.c, volume: +k.v,
+          ...(Number.isFinite(+k.V) ? { d: 2 * (+k.V) - (+k.v) } : {}) };
         const df = tfDef();
         if ((df.fact || 1) === 1) {
           // Revue : le kline est un SNAPSHOT (cadence 250 ms) qui peut précéder un
@@ -1778,14 +1819,19 @@ function startWs(attempt = 0) {
           const bt = bucketStart(sb.time), last = candles[candles.length - 1];
           if (!last) return;
           if (bt > last.time) {
-            applyBar({ time: bt, open: sb.open, high: sb.high, low: sb.low, close: sb.close, volume: sb.volume });
+            applyBar({ time: bt, open: sb.open, high: sb.high, low: sb.low, close: sb.close, volume: sb.volume,
+              ...(sb.d !== undefined ? { d: sb.d } : {}) });
             bucketVols = new Map([[sb.time, sb.volume]]);   // APRÈS applyBar (qui purge le seau précédent)
+            bucketDels = new Map([[sb.time, sb.d]]);
           } else if (bt === last.time) {
             /* volume du seau = somme des bougies source connues ; léger sous-comptage possible
                juste après un load mi-seau (corrigé par le prochain poll/fillGap) */
             bucketVols.set(sb.time, sb.volume);
+            bucketDels.set(sb.time, sb.d);
             let vol = 0; for (const v of bucketVols.values()) vol += v;
-            applyBar({ time: bt, open: last.open, high: Math.max(last.high, sb.high), low: Math.min(last.low, sb.low), close: sb.close, volume: Math.max(vol, last.volume) });
+            let dsum = 0, dOk = true; for (const v of bucketDels.values()) { if (v === undefined) { dOk = false; break; } dsum += v; }
+            applyBar({ time: bt, open: last.open, high: Math.max(last.high, sb.high), low: Math.min(last.low, sb.low), close: sb.close, volume: Math.max(vol, last.volume),
+              ...(dOk ? { d: dsum } : (last.d !== undefined ? { d: last.d } : {})) });
           }
         }
       }
@@ -3221,6 +3267,7 @@ async function loadOlder() {
         head.open = lastNew.open;
         if (lastNew.high > head.high) head.high = lastNew.high;
         if (lastNew.low < head.low) head.low = lastNew.low;
+        if (head.d !== undefined && lastNew.d !== undefined) head.d += lastNew.d; else delete head.d;
         head.volume += lastNew.volume;
         older.pop();
       }
@@ -3515,7 +3562,7 @@ if ('serviceWorker' in navigator && location.hostname.endsWith('github.io')) nav
 <script src="poi/stream.js?v=1"></script>
 <script src="poi/poi-render.js?v=77"></script>
 <script src="poi/poi-feature.js?v=47"></script>
-<script src="poi/liq-flux.js?v=44"></script>
+<script src="poi/liq-flux.js?v=45"></script>
 <script src="poi/whale-sonar.js?v=32"></script>
 <script src="poi/confluence.js?v=36"></script>
 </body>
