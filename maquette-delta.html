@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>G-ON — DELTA &amp; ABSORPTION · maquette</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#060604; color:#c9c4b4; font:12px/1.4 "Segoe UI", sans-serif; overflow:hidden; }
+  #stage { position:relative; width:100vw; height:100vh; }
+  canvas { position:absolute; inset:0; width:100%; height:100%; }
+  .lbl { position:absolute; font-size:9px; letter-spacing:2.5px; color:#6e6a58; text-transform:uppercase; }
+  #title { position:absolute; top:14px; left:18px; font-size:13px; letter-spacing:4px; color:#d9b64d; }
+  #title b { color:#f2ead2; font-weight:600; }
+  #subtitle { position:absolute; top:34px; left:18px; font-size:9px; letter-spacing:2px; color:#6e6a58; }
+  /* fiches d'explication des propositions */
+  .card { position:absolute; width:250px; background:rgba(10,9,6,.94); border:1px solid #4a3f22;
+          border-radius:6px; padding:9px 11px; box-shadow:0 6px 24px rgba(0,0,0,.7), 0 0 14px rgba(217,182,77,.08); }
+  .card h3 { font-size:10px; letter-spacing:2px; color:#d9b64d; margin-bottom:5px; }
+  .card h3 span { color:#060604; background:linear-gradient(180deg,#f0d478,#d9b64d); border-radius:3px;
+                  padding:1px 6px; margin-right:6px; font-weight:700; }
+  .card p { font-size:10.5px; color:#b3a67f; line-height:1.5; }
+  .card p b { color:#f2ead2; font-weight:600; }
+  #cardA { top:60px; left:18px; }
+  #cardB { top:190px; left:18px; }
+  #cardC { top:344px; left:18px; }
+  /* panneau liquidations mock (proposition C) */
+  #liqMock { position:absolute; top:60px; right:16px; width:225px; background:rgba(10,9,6,.94);
+             border:1px solid #4a3f22; border-radius:6px; padding:10px 12px; }
+  #liqMock .t { font-size:9px; letter-spacing:3px; color:#d9b64d; margin-bottom:8px; }
+  #liqMock .row { display:flex; justify-content:space-between; font-size:11px; padding:3px 0;
+                  font-variant-numeric:tabular-nums; }
+  #liqMock .row .k { color:#6e6a58; font-size:9px; letter-spacing:1.5px; align-self:center; }
+  #liqMock .oiUp { color:#3ecfd4; } #liqMock .oiDn { color:#ff2d5e; }
+  #liqMock .fund { color:#f0d478; }
+  #liqMock .regime { margin-top:7px; text-align:center; font-size:10px; letter-spacing:2px;
+                     color:#060604; background:linear-gradient(180deg,#ff8c5e,#e0564d);
+                     border-radius:4px; padding:3px 0; font-weight:700; }
+  #liqMock .note { margin-top:6px; font-size:9px; color:#6e6a58; line-height:1.5; }
+  #ctl { position:absolute; bottom:12px; left:50%; transform:translateX(-50%); font-size:9px;
+         color:#6e6a58; letter-spacing:1.5px; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="cv"></canvas>
+
+  <div id="title">G-<b>ON</b> · DELTA &amp; ABSORPTION</div>
+  <div id="subtitle">MAQUETTE — 3 PROPOSITIONS POUR LIRE L'INTENTION EN TEMPS RÉEL</div>
+
+  <div class="card" id="cardA">
+    <h3><span>A</span>VOLUME COLORÉ PAR DELTA</h3>
+    <p>Chaque barre de volume prend la couleur du <b>camp agresseur dominant</b>
+    (cyan = acheteurs, magenta = vendeurs), intensité = déséquilibre.
+    Le trait fin au-dessus est le <b>delta net</b> de la bougie.
+    Losange <b>DIV</b> : le prix baisse mais le delta monte — les vendeurs
+    s'épuisent contre des limites.</p>
+  </div>
+  <div class="card" id="cardB">
+    <h3><span>B</span>ABSORPTION SUR TOUCHE DE POI</h3>
+    <p>Quand le prix teste un niveau, la <b>jauge du chip</b> (B1) se remplit du
+    volume agressif jeté contre le niveau ; tant qu'il ne cède pas, elle vire
+    à l'or : <b>⌾ DÉFENDU</b>. L'<b>anneau</b> au point de touche (B2) grossit
+    avec l'absorption — d'un coup d'œil, de loin. Niveau qui casse sans
+    volume : jauge grise, pas de bouclier.</p>
+  </div>
+  <div class="card" id="cardC">
+    <h3><span>C</span>OPEN INTEREST + FUNDING</h3>
+    <p>Deux lignes dans le panneau liquidations : <b>OI 15 min</b> (les
+    positions ouvertes montent ou fondent) et <b>funding</b> avec compte à
+    rebours. Croisé aux compteurs : prix ↑ + OI ↓ + shorts brûlés =
+    <b>SQUEEZE</b>, pas une tendance — le badge le dit tout seul.</p>
+  </div>
+
+  <div id="liqMock">
+    <div class="t">LIQUIDATIONS · 15' &nbsp;<span style="color:#6e6a58">+ PROPOSITION C</span></div>
+    <div class="row"><span class="k">OPEN INTEREST 15'</span><span class="oiDn" id="oiVal">−2.4 % ▼</span></div>
+    <div class="row"><span class="k">FUNDING · 02:14</span><span class="fund">+0.0128 %</span></div>
+    <div class="regime" id="regime">SQUEEZE SHORTS</div>
+    <div class="note">prix ↑ · OI ↓ · shorts brûlés ↑ → mouvement de nettoyage,
+    pas de nouveau positionnement.</div>
+  </div>
+
+  <div id="ctl">MAQUETTE ANIMÉE — LES DONNÉES SONT SIMULÉES · CHARTE G-ON</div>
+</div>
+<script>
+"use strict";
+const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+const BULL = '#3ecfd4', BEAR = '#ff2d5e', GOLD = '#d9b64d', GOLD_B = '#f0d478';
+const rgba = (hex, a) => { const n = parseInt(hex.slice(1), 16);
+  return `rgba(${n>>16&255},${n>>8&255},${n&255},${a})`; };
+
+/* ---- scénario fabriqué : descente vers un POI, 3 touches ABSORBÉES (delta
+   vendeur massif, prix qui tient, divergence), rebond ; un 2e niveau CÈDE
+   sans volume plus haut dans l'historique. ---- */
+const N = 46, POI = 64980, POI2 = 65290;
+const C = [];   // {o,h,l,c,vol,delta}
+(function build() {
+  let p = 65340;
+  const path = [
+    // phase 1 : cassure MOLLE du niveau 2 (cède sans volume)
+    {n:6, drift:-14, vol:.35, d:-.25},
+    // phase 2 : descente impulsive vers le POI
+    {n:9, drift:-26, vol:.7, d:-.75},
+    // phase 3 : TOUCHES absorbées (gros volume vendeur, mèches, prix tient)
+    {n:8, drift:-2, vol:1.0, d:-.85, touch:true},
+    // phase 4 : divergence puis rebond
+    {n:8, drift:+6, vol:.65, d:+.35},
+    {n:9, drift:+20, vol:.8, d:+.7},
+    {n:6, drift:+8, vol:.45, d:+.4},
+  ];
+  let seed = 7; const rnd = () => (seed = (seed*1103515245+12345)%2147483648)/2147483648;
+  for (const ph of path) for (let i = 0; i < ph.n; i++) {
+    const o = p;
+    let c2 = p + ph.drift + (rnd()-.5)*22;
+    if (ph.touch) c2 = Math.max(POI + 4 + rnd()*26, c2);          // le corps ne casse pas
+    let l = Math.min(o, c2) - rnd()*20;
+    if (ph.touch) l = POI - (rnd()*8);                             // mèche qui pique le niveau
+    if (!ph.touch && l < POI + 12) l = POI + 12;
+    const h = Math.max(o, c2) + rnd()*18;
+    const vol = ph.vol * (0.55 + rnd()*.9);
+    const delta = ph.d + (rnd()-.5)*.3;
+    C.push({ o, h, l, c: c2, vol, delta: Math.max(-1, Math.min(1, delta)), touch: !!ph.touch });
+    p = c2;
+  }
+})();
+
+let W = 0, H = 0, dpr = 1;
+function size() {
+  dpr = devicePixelRatio || 1;
+  W = innerWidth; H = innerHeight;
+  cv.width = Math.round(W*dpr); cv.height = Math.round(H*dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+addEventListener('resize', size); size();
+
+function draw(now) {
+  ctx.clearRect(0, 0, W, H);
+  const left = 300, right = W - 265, top = 70, volH = 92, volTop = H - volH - 34, bottom = volTop - 14;
+  const plotW = right - left, plotH = bottom - top;
+  let lo = Infinity, hi = -Infinity;
+  for (const b of C) { if (b.l < lo) lo = b.l; if (b.h > hi) hi = b.h; }
+  lo -= 25; hi += 25;
+  const X = i => left + (i + .5) / N * plotW;
+  const Y = p => top + (hi - p) / (hi - lo) * plotH;
+  const bw = Math.max(4, plotW / N * .55);
+
+  /* grille */
+  ctx.strokeStyle = 'rgba(217,182,77,.06)'; ctx.lineWidth = 1;
+  for (let g = 0; g <= 6; g++) { const y = top + g/6*plotH;
+    ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(right, y); ctx.stroke(); }
+
+  /* ---- niveau POI2 : CÉDÉ sans volume (contre-exemple) ---- */
+  const y2 = Y(POI2);
+  ctx.setLineDash([5,4]); ctx.strokeStyle = rgba(BEAR,.35); ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(left, y2); ctx.lineTo(X(7), y2); ctx.stroke(); ctx.setLineDash([]);
+  chip(X(7)+8, y2, '65,290', '61', BEAR, { gauge: .18, state: 'CÈDE', dead: true });
+
+  /* ---- niveau POI : DÉFENDU (proposition B) ---- */
+  const y1 = Y(POI);
+  const pulse = .55 + .45 * Math.sin(now*.004);
+  ctx.strokeStyle = rgba(BULL, .5 + .3*pulse); ctx.lineWidth = 1.6;
+  ctx.shadowColor = BULL; ctx.shadowBlur = 6 + 6*pulse;
+  ctx.beginPath(); ctx.moveTo(left, y1); ctx.lineTo(right - 130, y1); ctx.stroke();
+  ctx.shadowBlur = 0;
+
+  /* B2 : anneau d'absorption au point de touche */
+  const tx = X(19);
+  const absorb = .78;
+  ctx.strokeStyle = rgba(GOLD_B, .25); ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.arc(tx, y1, 16, 0, Math.PI*2); ctx.stroke();
+  ctx.strokeStyle = rgba(GOLD_B, .55 + .35*pulse); ctx.shadowColor = GOLD_B; ctx.shadowBlur = 8*pulse;
+  ctx.beginPath(); ctx.arc(tx, y1, 16, -Math.PI/2, -Math.PI/2 + absorb*Math.PI*2); ctx.stroke();
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = GOLD_B; ctx.font = '700 9px Consolas, monospace'; ctx.textAlign = 'center';
+  ctx.fillText('78%', tx, y1 + 3.5); ctx.textAlign = 'left';
+  ctx.fillStyle = rgba(GOLD_B,.8); ctx.font = '600 9px Segoe UI';
+  ctx.fillText('B2 · anneau de touche', tx - 34, y1 + 34);
+
+  /* B1 : chip niveau + jauge d'absorption + bouclier */
+  chip(right - 122, y1, '64,980', '74', BULL, { gauge: absorb, state: '⌾ DÉFENDU', pulse });
+
+  /* bougies */
+  for (let i = 0; i < N; i++) {
+    const b = C[i], x = X(i), up = b.c >= b.o, col = up ? BULL : BEAR;
+    ctx.strokeStyle = rgba(col,.9); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x, Y(b.h)); ctx.lineTo(x, Y(b.l)); ctx.stroke();
+    ctx.fillStyle = rgba(col,.85);
+    const yO = Y(b.o), yC = Y(b.c);
+    ctx.fillRect(x - bw/2, Math.min(yO,yC), bw, Math.max(1.5, Math.abs(yC-yO)));
+  }
+
+  /* divergence (proposition A) : prix au plus bas, delta qui remonte */
+  const dx = X(22), dy = Y(C[22].l) + 16;
+  ctx.fillStyle = GOLD_B; ctx.shadowColor = GOLD_B; ctx.shadowBlur = 6;
+  ctx.beginPath(); ctx.moveTo(dx, dy-5); ctx.lineTo(dx+5, dy); ctx.lineTo(dx, dy+5); ctx.lineTo(dx-5, dy);
+  ctx.closePath(); ctx.fill(); ctx.shadowBlur = 0;
+  ctx.font = '700 9px Segoe UI'; ctx.fillText('DIV — vendeurs épuisés', dx + 9, dy + 3);
+
+  /* ---- rangée volume/delta (proposition A) ---- */
+  ctx.fillStyle = '#6e6a58'; ctx.font = '9px Segoe UI';
+  ctx.fillText('VOLUME × DELTA (A)', left, volTop - 4);
+  let vmax = 0; for (const b of C) if (b.vol > vmax) vmax = b.vol;
+  for (let i = 0; i < N; i++) {
+    const b = C[i], x = X(i), h2 = b.vol / vmax * (volH - 22);
+    const dom = Math.abs(b.delta);                        // intensité = déséquilibre
+    const col = b.delta >= 0 ? BULL : BEAR;
+    ctx.fillStyle = rgba(col, .25 + .6*dom);
+    ctx.fillRect(x - bw/2, volTop + (volH - 22) - h2, bw, h2);
+    /* trait du delta NET au-dessus de la barre */
+    ctx.fillStyle = rgba(col, .95);
+    const dh = Math.abs(b.delta) * 9 + 1;
+    ctx.fillRect(x - bw/2, volTop + (volH - 22) - h2 - dh - 2, bw, dh);
+  }
+  /* ligne zéro delta */
+  ctx.strokeStyle = 'rgba(217,182,77,.15)';
+  ctx.beginPath(); ctx.moveTo(left, volTop + volH - 22); ctx.lineTo(right, volTop + volH - 22); ctx.stroke();
+
+  requestAnimationFrame(draw);
+}
+
+/* chip de niveau, à la charte de l'app, ÉTENDU par la jauge d'absorption (B1) */
+function chip(x, y, price, score, col, opt) {
+  const w = 118, h = 30;
+  ctx.fillStyle = 'rgba(8,7,4,.92)';
+  ctx.strokeStyle = rgba(opt.dead ? '#6e6a58' : col, .8); ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.roundRect(x, y - h/2, w, h, 4); ctx.fill(); ctx.stroke();
+  ctx.font = '700 11px Consolas, monospace';
+  ctx.fillStyle = opt.dead ? '#8d8875' : '#f2ead2';
+  ctx.fillText(price, x + 8, y - 3);
+  ctx.fillStyle = rgba(col,.9); ctx.font = '700 9px Consolas, monospace';
+  ctx.fillText(score, x + 62, y - 3);
+  /* jauge d'absorption */
+  const gw = w - 16, gx = x + 8, gy = y + 5;
+  ctx.fillStyle = 'rgba(110,106,88,.25)'; ctx.fillRect(gx, gy, gw, 4);
+  const gcol = opt.dead ? '#6e6a58' : GOLD_B;
+  ctx.fillStyle = rgba(gcol, opt.dead ? .5 : .6 + .4*(opt.pulse ?? 0));
+  if (!opt.dead) { ctx.shadowColor = GOLD_B; ctx.shadowBlur = 5*(opt.pulse ?? 0); }
+  ctx.fillRect(gx, gy, gw * opt.gauge, 4);
+  ctx.shadowBlur = 0;
+  ctx.font = '700 8px Segoe UI';
+  ctx.fillStyle = opt.dead ? '#8d8875' : GOLD_B;
+  ctx.fillText(opt.state, x + 78, y - 3);
+}
+requestAnimationFrame(draw);
+</script>
+</body>
+</html>
