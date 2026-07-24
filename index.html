@@ -1159,10 +1159,12 @@ async function fetchOlderSecLocal() {
   const seq = loadSeq, headT = candles[0].time;
   let j = null;
   try {
-    // targetAddressSpace loopback : requis par Chrome (Private Network Access)
+    // targetAddressSpace loopback : requis par Chrome (Local Network Access)
     // pour qu'une page HTTPS atteigne 127.0.0.1 ; ignoré par les navigateurs
-    // qui ne le connaissent pas.
-    const r = await fetch(`http://127.0.0.1:8787/sec/${symbol}`, { signal: AbortSignal.timeout(900), targetAddressSpace: 'loopback' });
+    // qui ne le connaissent pas. Timeout 3,5 s : le PREMIER appel paie
+    // l'échauffement permission/préflight (~2-3 s constatés) — 900 ms le
+    // faisait échouer et blacklistait le démon à tort pour 5 min.
+    const r = await fetch(`http://127.0.0.1:8787/sec/${symbol}`, { signal: AbortSignal.timeout(3500), targetAddressSpace: 'loopback' });
     if (r.ok) j = await r.json();
   } catch {}
   if (seq !== loadSeq || !ctxFresh()) return null;
