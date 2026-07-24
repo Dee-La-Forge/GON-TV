@@ -374,15 +374,29 @@
             // fenetre M15 COURANTE se raffine legitimement sur l'extreme
             // "jusqu'ici" (provisoire, naissances live).
             if (A[0].time <= f0) {
+              // Alignement visuel (Meddy 2026-07-24, mesure en reel 15s : 21/36
+              // anneaux de naissance sur une bougie qui n'ATTEINT pas la ligne
+              // tracee — l'extreme de la fenetre forme la zone mais s'arrete
+              // souvent sous/dessus l'entry). Parmi les bougies de la fenetre,
+              // PRIORITE a celles qui intersectent la ligne (extreme parmi
+              // elles) ; repli : extreme brut (comportement precedent).
+              const eB = poi.entry ?? poi.entryPrice ?? (poi.direction === "long" ? poi.zoneHigh : poi.zoneLow);
               let lo = 0, hi = A.length - 1;
               while (hi - lo > 1) { const m = (lo + hi) >> 1; if (A[m].time < f0) lo = m; else hi = m; }
-              let bestV = null;
+              let bestV = null, bestTouchV = null, vTouch = null;
               for (let i = lo; i < A.length && A[i].time < to; i++) {
                 const b = A[i];
                 if (b.time + s <= from) continue;
-                if (poi.direction === "short") { if (bestV == null || b.high > bestV) { bestV = b.high; v = b.time; } }
-                else { if (bestV == null || b.low < bestV) { bestV = b.low; v = b.time; } }
+                const touches = eB != null && b.low <= eB && b.high >= eB;
+                if (poi.direction === "short") {
+                  if (bestV == null || b.high > bestV) { bestV = b.high; v = b.time; }
+                  if (touches && (bestTouchV == null || b.high > bestTouchV)) { bestTouchV = b.high; vTouch = b.time; }
+                } else {
+                  if (bestV == null || b.low < bestV) { bestV = b.low; v = b.time; }
+                  if (touches && (bestTouchV == null || b.low < bestTouchV)) { bestTouchV = b.low; vTouch = b.time; }
+                }
               }
+              if (vTouch != null) v = vTouch;
             }
           } else {
             // TOUCHE/MORT — recherche ETAGEE (equipe debug, mesures : 17 % des
@@ -422,13 +436,21 @@
             // cluster en premier pouvait attraper une bougie AVANT la vraie
             // touche de zone) -> enveloppe cluster. Etages 2-3 elargis. Repli :
             // snapped = bougie CONTENANTE (FLOOR).
+            // Alignement visuel (Meddy 2026-07-24, mesure en reel 15s : 5/33
+            // fins ancrees sur une bougie qui ne TOUCHE PAS le prix trace —
+            // un hit de zone/cluster dans la fenetre exacte court-circuitait
+            // la recherche LIGNE elargie ; la ligne est dessinee a l'ENTRY et
+            // la meche s'arretait quelques dollars avant). PRIORITE ABSOLUE a
+            // une bougie qui intersecte la ligne tracee, fenetres de plus en
+            // plus larges ; la zone ne sert plus que de dernier repli.
             let viaExact = true;
-            let r = seek(w0, w0 + W15, "line", true)
-              ?? seek(w0, w0 + W15, "zoneStrict", true)
-              ?? seek(w0, w0 + W15, "zone", true);
+            let r = seek(w0, w0 + W15, "line", true);
             if (r == null) {
               viaExact = false;
               r = seek(w0 - W15, w0 + 2 * W15, "line", false)
+                ?? seek(w0 - 3 * W15, w0 + 4 * W15, "line", false)
+                ?? seek(w0, w0 + W15, "zoneStrict", true)
+                ?? seek(w0, w0 + W15, "zone", true)
                 ?? seek(w0 - 3 * W15, w0 + 4 * W15, "zone", false);
             }
             v = r ?? snapped;
