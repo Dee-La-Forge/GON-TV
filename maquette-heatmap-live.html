@@ -20,7 +20,7 @@
   #status { margin-left:auto; font-size:10px; letter-spacing:1.5px; color:#7d795f;
             font-variant-numeric:tabular-nums; }
   #live { color:var(--gold-b); font-weight:700; }
-  #wallsBox { position:fixed; top:52px; right:78px; z-index:6; background:rgba(10,9,6,.9);
+  #wallsBox { position:fixed; left:10px; bottom:14px; z-index:6; background:rgba(10,9,6,.9);
               border:1px solid var(--border); border-radius:6px; padding:8px 11px; min-width:215px; }
   #wallsBox .hd { font-size:8.5px; letter-spacing:2.5px; color:var(--gold); margin-bottom:5px; }
   #wallsBox .row { display:flex; justify-content:space-between; gap:12px; font-size:10.5px; padding:1.5px 0;
@@ -73,7 +73,15 @@
     <button data-r="net">NET</button>
     <button data-r="camps">CAMPS</button>
     <button id="scaleBtn" class="on">ÉCHELLE $</button>
-    <span>· mêmes données réelles · <b>survolez</b> pour la valeur exacte</span>
+    <span style="letter-spacing:2px; color:var(--gold)">· DÉGRADÉ :</span>
+    <button data-g="braise" class="on">BRAISE</button>
+    <button data-g="or">OR</button>
+    <button data-g="glace">GLACE</button>
+    <button data-g="ivoire">IVOIRE</button>
+    <span style="letter-spacing:2px; color:var(--gold)">· INTENSITÉ</span>
+    <input id="intSlider" type="range" min="40" max="220" value="100"
+           style="width:110px; accent-color:#d9b64d; vertical-align:middle">
+    <span>· <b>survolez</b> pour la valeur exacte</span>
   </div>
   <div id="tip"></div>
 
@@ -89,6 +97,8 @@ let sym = 'BTCUSDT', binSize = 0, priceDec = 1;
 let samples = [], wallHist = new Map(), walls = [], fled = [];
 let style = 'braise';
 let showScale = true;                         /* option : le dégradé en échelle de valeurs $ */
+let ramp = 'braise';                          /* option : dégradé de couleurs de la map */
+let intensity = 1;                            /* option : slider d'intensité */
 let lastView = null;                          /* contexte du dernier rendu, pour le survol */
 
 /* ---- rampes 256 teintes précalculées : [q, r, g, b, a] ; plancher net sous q=0.10 ---- */
@@ -124,6 +134,12 @@ const LUT_BRAISE = buildRamp([                            /* braise sous la cend
   [0.47, 166, 136,  60,  51], [0.82, 217, 182,  77, 140],
   [1.00, 240, 212, 120, 191],
 ]);
+const LUT_IVOIRE = buildRamp([                            /* monochrome ivoire, sobriété maximale */
+  [0.00,  60,  54,  38,   0], [0.16,  60,  54,  38,   0],
+  [0.47, 150, 138, 110,  60], [0.82, 225, 215, 190, 150],
+  [1.00, 255, 250, 235, 205],
+]);
+const RAMPS = { braise: LUT_BRAISE, or: LUT_OR, glace: LUT_BULL, ivoire: LUT_IVOIRE };
 
 const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
 const off = document.createElement('canvas'), octx = off.getContext('2d');
@@ -145,6 +161,11 @@ document.getElementById('scaleBtn').onclick = () => {
   showScale = !showScale;
   document.getElementById('scaleBtn').classList.toggle('on', showScale);
   render(); };
+for (const b of document.querySelectorAll('#legend button[data-g]')) b.onclick = () => {
+  ramp = b.dataset.g;
+  for (const x of document.querySelectorAll('#legend button[data-g]')) x.classList.toggle('on', x === b);
+  render(); };
+document.getElementById('intSlider').oninput = e => { intensity = +e.target.value/100; render(); };
 
 async function poll() {
   try {
@@ -263,13 +284,14 @@ function render() {
       }
       G = gv;
     }
+    const LUT_MAP = braise ? RAMPS[ramp] : LUT_OR;
     for (let r = 0; r < rows; r++) {
       const o = r*vis.length, k = kHi - r;
       for (let i = 0; i < vis.length; i++) {
-        const q = G[o+i];
+        const q = Math.min(1, G[o+i]*intensity);
         if (q <= 0) continue;
-        const L = braise ? LUT_BRAISE : dual ? ((k + .5)*binSize < vis[i].mid ? LUT_BULL : LUT_BEAR) : LUT_OR;
-        const li = Math.min(255, Math.round(q*255))*4;
+        const L = dual ? ((k + .5)*binSize < vis[i].mid ? LUT_BULL : LUT_BEAR) : LUT_MAP;
+        const li = Math.round(q*255)*4;
         const p2 = (o+i)*4;
         px[p2] = L[li]; px[p2+1] = L[li+1]; px[p2+2] = L[li+2]; px[p2+3] = L[li+3];
       }
@@ -471,9 +493,10 @@ function render() {
     }
 
     if (showScale) {
-      /* l'option demandée : le dégradé lui-même comme échelle de valeurs, en $ RÉELS
-         (recalculés à chaque sonde — l'échelle est relative à la médiane du carnet) */
-      const sh = 150, sw = 10, sx = left + 12, sy = bottom - 26 - sh;
+      /* le dégradé lui-même comme échelle de valeurs, en $ RÉELS — recalculés à chaque
+         sonde ; le slider d'intensité décale l'échelle (couleur = v tel que q·intensité) */
+      const SC = RAMPS[ramp];
+      const sh = 150, sw = 10, sx = left + 12, sy = bottom - 150 - sh;
       ctx.fillStyle = 'rgba(8,7,4,.82)';
       ctx.fillRect(sx - 7, sy - 24, 122, sh + 44);
       ctx.strokeStyle = 'rgba(107,90,42,.5)'; ctx.lineWidth = 1;
@@ -482,7 +505,7 @@ function render() {
       ctx.fillText('LIQUIDITÉ POSÉE · RÉEL', sx - 1, sy - 11);
       for (let p2 = 0; p2 < sh; p2++) {
         const q = 1 - p2/(sh - 1), li = Math.round(q*255)*4;
-        ctx.fillStyle = `rgba(${LUT_BRAISE[li]},${LUT_BRAISE[li+1]},${LUT_BRAISE[li+2]},${Math.max(.10, LUT_BRAISE[li+3]/255)})`;
+        ctx.fillStyle = `rgba(${SC[li]},${SC[li+1]},${SC[li+2]},${Math.max(.10, SC[li+3]/255)})`;
         ctx.fillRect(sx, sy + p2, sw, 1);
       }
       ctx.font = '9px Consolas, monospace';
@@ -490,7 +513,7 @@ function render() {
         const y = sy + (1 - q)*(sh - 1);
         ctx.fillStyle = rgba(GOLD_B, .85);
         ctx.fillRect(sx + sw + 1, y, 3, 1);
-        ctx.fillText(fmtUsd(med*Math.pow(48, q)), sx + sw + 7, y + 3);
+        ctx.fillText(fmtUsd(med*Math.pow(48, Math.min(1.1, q/intensity))), sx + sw + 7, y + 3);
       }
       ctx.fillStyle = '#7d795f'; ctx.font = '8px Segoe UI';
       ctx.fillText(`sous ${fmtUsd(med)} : éteint`, sx - 1, sy + sh + 13);
@@ -511,11 +534,11 @@ function render() {
     const pimg = prjx.createImageData(1, rows), pd = pimg.data;
     for (let r = 0; r < rows; r++) {
       /* extrémités feutrées ici aussi : demi-teinte diffusée sur les paliers voisins */
-      const q = Math.max(lastQ[r], .45*(r > 0 ? lastQ[r-1] : 0), .45*(r < rows-1 ? lastQ[r+1] : 0));
+      const q = Math.min(1, Math.max(lastQ[r], .45*(r > 0 ? lastQ[r-1] : 0), .45*(r < rows-1 ? lastQ[r+1] : 0))*intensity);
       if (q <= 0) continue;
       const k = kHi - r;
-      const L = style === 'braise' ? LUT_BRAISE : dual2 ? ((k + .5)*binSize < lastS.mid ? LUT_BULL : LUT_BEAR) : LUT_OR;
-      const li = Math.min(255, Math.round(q*255))*4;
+      const L = style === 'braise' ? RAMPS[ramp] : dual2 ? ((k + .5)*binSize < lastS.mid ? LUT_BULL : LUT_BEAR) : LUT_OR;
+      const li = Math.round(q*255)*4;
       const o = r*4;
       pd[o] = L[li]; pd[o+1] = L[li+1]; pd[o+2] = L[li+2]; pd[o+3] = Math.round(L[li+3]*.55);
     }
