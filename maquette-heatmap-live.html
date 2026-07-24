@@ -37,6 +37,11 @@
                    border-radius:3px; font-size:10px; letter-spacing:1px; cursor:pointer; }
   #legend button.on { color:#060604; background:linear-gradient(180deg,var(--gold-b),var(--gold)); font-weight:700; }
   canvas#cv { position:fixed; left:0; top:40px; right:0; bottom:0; width:100vw; height:calc(100vh - 40px); }
+  #tip { position:fixed; display:none; z-index:20; pointer-events:none;
+         background:rgba(10,9,6,.96); border:1px solid var(--gold-d); border-radius:5px;
+         padding:5px 9px; font-size:10.5px; color:#e8dcb0; font-variant-numeric:tabular-nums;
+         box-shadow:0 4px 14px rgba(0,0,0,.5); }
+  #tip b { color:var(--gold-b); font-family:Consolas, monospace; }
 </style>
 </head>
 <body>
@@ -58,12 +63,13 @@
 
   <div id="legend">
     <span style="letter-spacing:2px; color:var(--gold)">STYLE :</span>
-    <button data-r="soie" class="on">SOIE</button>
+    <button data-r="filaments" class="on">FILAMENTS</button>
+    <button data-r="soie">SOIE</button>
     <button data-r="net">NET</button>
-    <button data-r="filaments">FILAMENTS</button>
     <button data-r="camps">CAMPS</button>
-    <span>· <b>mêmes données réelles</b>, 4 habillages — tous au même coût (une image de fond)</span>
+    <span>· <b>épaisseur = taille</b> · étiquettes = murs posés maintenant · <b>survolez</b> pour la valeur exacte de chaque point</span>
   </div>
+  <div id="tip"></div>
 
 <script>
 "use strict";
@@ -75,7 +81,8 @@ const fmtUsd = v => v >= 1e6 ? (v/1e6).toFixed(1)+'M$' : v >= 1e3 ? (v/1e3).toFi
 const EVERY = 2500, CAP = 1440;               /* 2.5 s × 1440 = 60 min de mémoire */
 let sym = 'BTCUSDT', binSize = 0, priceDec = 1;
 let samples = [], wallHist = new Map(), walls = [], fled = [];
-let style = 'soie';
+let style = 'filaments';
+let lastView = null;                          /* contexte du dernier rendu, pour le survol */
 
 /* ---- rampes 256 teintes précalculées : [q, r, g, b, a] ; plancher net sous q=0.10 ---- */
 function buildRamp(stops) {
@@ -239,25 +246,48 @@ function render() {
   }
 
   if (style === 'filaments') {
-    /* FILAMENTS : la base en retrait + les murs en traits laser, le langage de l'app */
+    /* FILAMENTS : la base en retrait + les murs en traits laser, le langage de l'app.
+       Épaisseur = taille du mur ; la valeur se lit sans effort. */
     const cw2 = plotW / vis.length, rh = plotH / rows;
     for (let k = kLo; k <= kHi; k++) {
       const y = top + (kHi - k + .5)*rh;
-      let i0 = -1;
+      let i0 = -1, qMax = 0;
       for (let i = 0; i <= vis.length; i++) {
         const v = i < vis.length ? (vis[i].bins.get(k) || 0) : 0;
-        const on = v > 0 && qOf(v) >= .55;
-        if (on && i0 < 0) i0 = i;
-        else if (!on && i0 >= 0) {
-          const q = qOf(vis[Math.max(i0, i-1)].bins.get(k) || 0);
-          ctx.strokeStyle = rgba(q >= .80 ? '#fff8e0' : GOLD_B, .35 + .6*q);
-          ctx.lineWidth = q >= .80 ? 2 : 1.2;
-          if (q >= .80) { ctx.shadowColor = GOLD_B; ctx.shadowBlur = 6; }
+        const q = v > 0 ? qOf(v) : 0;
+        const on = q >= .50;
+        if (on && i0 < 0) { i0 = i; qMax = q; }
+        else if (on) { if (q > qMax) qMax = q; }
+        else if (i0 >= 0) {
+          ctx.strokeStyle = rgba(qMax >= .80 ? '#fff8e0' : GOLD_B, .35 + .6*qMax);
+          ctx.lineWidth = 1 + 2.6*(qMax - .5)/.5;
+          if (qMax >= .80) { ctx.shadowColor = GOLD_B; ctx.shadowBlur = 6; }
           ctx.beginPath(); ctx.moveTo(left + i0*cw2, y); ctx.lineTo(left + i*cw2, y); ctx.stroke();
           ctx.shadowBlur = 0; i0 = -1;
         }
       }
     }
+    /* étiquettes prix · montant des murs POSÉS MAINTENANT, au bord droit */
+    const last = vis[vis.length - 1], items = [];
+    for (const [k, v] of last.bins) {
+      if (k < kLo || k > kHi) continue;
+      const q = qOf(v);
+      if (q >= .50) items.push({ y: top + (kHi - k + .5)*rh, p: (k + .5)*binSize, v, q });
+    }
+    items.sort((a, b) => b.q - a.q); items.length = Math.min(items.length, 8);
+    items.sort((a, b) => a.y - b.y);
+    let prevY = -1e9;
+    ctx.textAlign = 'right'; ctx.font = '700 9px Consolas, monospace';
+    for (const it of items) {
+      const y = Math.max(it.y, prevY + 12); prevY = y;
+      const txt = `${it.p.toFixed(priceDec)} · ${fmtUsd(it.v)}`;
+      const w = ctx.measureText(txt).width;
+      ctx.fillStyle = 'rgba(8,7,4,.85)';
+      ctx.fillRect(right - w - 12, y - 6.5, w + 9, 13);
+      ctx.fillStyle = it.q >= .80 ? '#fff8e0' : GOLD_B;
+      ctx.fillText(txt, right - 6, y + 3.5);
+    }
+    ctx.textAlign = 'left';
   }
 
   /* échelle de prix réelle */
@@ -287,7 +317,31 @@ function render() {
   ctx.shadowBlur = 0;
   ctx.font = '700 10px Consolas, monospace';
   ctx.fillText(vis[vis.length-1].mid.toFixed(priceDec), right + 6, lastY + 3);
+
+  lastView = { left, top, plotW, plotH, kLo, kHi, rows, vis, med, qOf };
 }
+
+/* survol : la valeur exacte de n'importe quel point de l'histoire */
+const tip = document.getElementById('tip');
+cv.addEventListener('mousemove', e => {
+  const V = lastView;
+  if (!V) { tip.style.display = 'none'; return; }
+  const r = cv.getBoundingClientRect();
+  const mx = e.clientX - r.left, my = e.clientY - r.top;
+  const i = Math.floor((mx - V.left)/V.plotW*V.vis.length);
+  const k = V.kHi - Math.floor((my - V.top)/V.plotH*V.rows);
+  if (i < 0 || i >= V.vis.length || k < V.kLo || k > V.kHi) { tip.style.display = 'none'; return; }
+  const v = V.vis[i].bins.get(k) || 0;
+  if (v <= V.med) { tip.style.display = 'none'; return; }
+  const d = new Date(V.vis[i].t);
+  const hh = `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`;
+  tip.innerHTML = `<b>${((k + .5)*binSize).toFixed(priceDec)}</b> — <b>${fmtUsd(v)}</b>` +
+    ` <span style="color:#7d795f">posés · ${hh} · ${(v/V.med).toFixed(0)}× la normale</span>`;
+  tip.style.left = (e.clientX + 14) + 'px';
+  tip.style.top  = (e.clientY + 12) + 'px';
+  tip.style.display = 'block';
+});
+cv.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
 
 addEventListener('resize', render);
 poll();
