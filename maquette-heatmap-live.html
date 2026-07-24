@@ -31,10 +31,11 @@
   #wallsBox .fled .k { color:#8a5560; }
   #legend { position:fixed; bottom:8px; left:50%; transform:translateX(-50%); z-index:8;
             background:rgba(10,9,6,.95); border:1px solid var(--gold-d); border-radius:6px;
-            padding:8px 14px; font-size:10px; color:#b3a67f; display:flex; gap:14px; align-items:center; }
+            padding:8px 14px; font-size:10px; color:#b3a67f; display:flex; gap:10px; align-items:center; }
   #legend b { color:var(--gold-b); }
-  #ramp { width:110px; height:8px; border-radius:4px; border:1px solid #26200e;
-          background:linear-gradient(90deg, rgba(26,20,8,0), #6b5a2a, #d9b64d, #f0d478, #fff8e0); }
+  #legend button { background:#0f0d08; border:1px solid var(--border); color:#8d8154; padding:4px 10px;
+                   border-radius:3px; font-size:10px; letter-spacing:1px; cursor:pointer; }
+  #legend button.on { color:#060604; background:linear-gradient(180deg,var(--gold-b),var(--gold)); font-weight:700; }
   canvas#cv { position:fixed; left:0; top:40px; right:0; bottom:0; width:100vw; height:calc(100vh - 40px); }
 </style>
 </head>
@@ -56,14 +57,17 @@
   </div>
 
   <div id="legend">
-    <span style="letter-spacing:2px; color:var(--gold)">LIQUIDITÉ</span>
-    <span id="ramp"></span>
-    <span><b>brume ambrée → mur blanc-or</b> · carnet réel Binance (500 niveaux/côté ≈ ±0.1 %, sonde 2.5 s) · la page se remplit en vivant</span>
+    <span style="letter-spacing:2px; color:var(--gold)">STYLE :</span>
+    <button data-r="soie" class="on">SOIE</button>
+    <button data-r="net">NET</button>
+    <button data-r="filaments">FILAMENTS</button>
+    <button data-r="camps">CAMPS</button>
+    <span>· <b>mêmes données réelles</b>, 4 habillages — tous au même coût (une image de fond)</span>
   </div>
 
 <script>
 "use strict";
-const BULL = '#3ecfd4';
+const BULL = '#3ecfd4', GOLD = '#d9b64d', GOLD_B = '#f0d478';
 const rgba = (hex, a) => { const n = parseInt(hex.slice(1), 16);
   return `rgba(${n>>16&255},${n>>8&255},${n&255},${a})`; };
 const fmtUsd = v => v >= 1e6 ? (v/1e6).toFixed(1)+'M$' : v >= 1e3 ? (v/1e3).toFixed(0)+'k$' : v.toFixed(0)+'$';
@@ -71,29 +75,40 @@ const fmtUsd = v => v >= 1e6 ? (v/1e6).toFixed(1)+'M$' : v >= 1e3 ? (v/1e3).toFi
 const EVERY = 2500, CAP = 1440;               /* 2.5 s × 1440 = 60 min de mémoire */
 let sym = 'BTCUSDT', binSize = 0, priceDec = 1;
 let samples = [], wallHist = new Map(), walls = [], fled = [];
+let style = 'soie';
 
-/* ---- LUT 256 teintes : brume ambrée → or → blanc-or (l'alpha ET la clarté montent) ---- */
-const LUT = new Uint8ClampedArray(256*4);
-(function buildLut() {
-  const stops = [                              /* [q, r, g, b, a] */
-    [0.00,  26,  20,   8,   0],
-    [0.22, 107,  90,  42,  85],
-    [0.50, 217, 182,  77, 160],
-    [0.78, 240, 212, 120, 225],
-    [1.00, 255, 248, 224, 255],
-  ];
+/* ---- rampes 256 teintes précalculées : [q, r, g, b, a] ; plancher net sous q=0.10 ---- */
+function buildRamp(stops) {
+  const L = new Uint8ClampedArray(256*4);
   for (let i = 0; i < 256; i++) {
     const q = i/255;
     let a = stops[0], b = stops[stops.length-1];
     for (let s = 0; s < stops.length-1; s++)
       if (q >= stops[s][0] && q <= stops[s+1][0]) { a = stops[s]; b = stops[s+1]; break; }
     const t = (q - a[0]) / ((b[0] - a[0]) || 1);
-    for (let c = 0; c < 4; c++) LUT[i*4+c] = Math.round(a[c+1] + (b[c+1] - a[c+1])*t);
+    for (let c = 0; c < 4; c++) L[i*4+c] = Math.round(a[c+1] + (b[c+1] - a[c+1])*t);
   }
-})();
+  return L;
+}
+const LUT_OR = buildRamp([
+  [0.00,  26,  20,   8,   0], [0.10,  40,  32,  14,   0],
+  [0.28, 107,  90,  42,  80], [0.55, 217, 182,  77, 160],
+  [0.80, 240, 212, 120, 225], [1.00, 255, 248, 224, 255],
+]);
+const LUT_BULL = buildRamp([
+  [0.00,   6,  42,  44,   0], [0.10,  10,  52,  54,   0],
+  [0.28,  20,  90,  94,  80], [0.55,  62, 207, 212, 160],
+  [0.80, 150, 236, 240, 225], [1.00, 234, 255, 255, 255],
+]);
+const LUT_BEAR = buildRamp([
+  [0.00,  44,  10,  20,   0], [0.10,  54,  12,  24,   0],
+  [0.28, 110,  30,  50,  80], [0.55, 255,  45,  94, 160],
+  [0.80, 255, 140, 170, 225], [1.00, 255, 234, 240, 255],
+]);
 
 const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
 const off = document.createElement('canvas'), octx = off.getContext('2d');
+const tmp = document.createElement('canvas'), tctx = tmp.getContext('2d');
 function sizeOf(c) { const r = c.getBoundingClientRect(), d = devicePixelRatio||1;
   c.width = Math.round(r.width*d); c.height = Math.round(r.height*d);
   c.getContext('2d').setTransform(d,0,0,d,0,0); return [r.width, r.height]; }
@@ -102,6 +117,10 @@ for (const b of document.querySelectorAll('.symb')) b.onclick = () => {
   sym = b.dataset.s; binSize = 0; samples = []; wallHist.clear(); walls = []; fled = [];
   for (const x of document.querySelectorAll('.symb')) x.classList.toggle('on', x === b);
   document.getElementById('status').textContent = 'connexion…'; render(); };
+for (const b of document.querySelectorAll('#legend button')) b.onclick = () => {
+  style = b.dataset.r;
+  for (const x of document.querySelectorAll('#legend button')) x.classList.toggle('on', x === b);
+  render(); };
 
 async function poll() {
   try {
@@ -178,24 +197,62 @@ function render() {
   const Y = p => top + (pHi - p)/(pHi - pLo)*plotH;
   for (const s of vis) for (const v of s.bins.values()) if (v > max) max = v;
   if (!max) return;
+  const qOf = v => Math.pow(v/max, .35);                  /* log-doux : un méga-mur n'éteint pas le reste */
 
-  /* ---- LE rendu : 1 px par sonde × 1 px par palier, LUT, puis lissage GPU ----
-     (en prod : on n'écrirait qu'UNE colonne par sonde ; ici on refait la mini-image,
-     ~100 k pixels, 2-3 ms toutes les 2.5 s — le chart, lui, ne paie qu'un drawImage) */
+  /* ---- mini-image 1 px/sonde × 1 px/palier (en prod : une seule colonne ajoutée/sonde) ---- */
   off.width = vis.length; off.height = rows;
   const img = octx.createImageData(vis.length, rows), px = img.data;
+  const dual = style === 'camps';
   for (let i = 0; i < vis.length; i++) {
-    for (const [k, v] of vis[i].bins) {
+    const s = vis[i];
+    for (const [k, v] of s.bins) {
       if (k < kLo || k > kHi) continue;
-      const q = Math.pow(v/max, .35);                     /* log-doux : un méga-mur n'éteint pas la brume */
-      const li = Math.min(255, Math.round(q*255))*4;
+      const L = dual ? ((k + .5)*binSize < s.mid ? LUT_BULL : LUT_BEAR) : LUT_OR;
+      const li = Math.min(255, Math.round(qOf(v)*255))*4;
       const o = ((kHi - k)*vis.length + i)*4;
-      px[o] = LUT[li]; px[o+1] = LUT[li+1]; px[o+2] = LUT[li+2]; px[o+3] = LUT[li+3];
+      px[o] = L[li]; px[o+1] = L[li+1]; px[o+2] = L[li+2]; px[o+3] = L[li+3];
     }
   }
   octx.putImageData(img, 0, 0);
-  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(off, 0, 0, vis.length, rows, left, top, plotW, plotH);
+
+  if (style === 'net') {
+    /* NET : pixels francs, façon scanline — zéro lissage */
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(off, 0, 0, vis.length, rows, left, top, plotW, plotH);
+  } else {
+    /* SOIE / CAMPS / base FILAMENTS : colonnes franches en X, fondu seulement en Y
+       (étirement en 2 temps : X sans lissage, puis Y avec lissage GPU) */
+    tmp.width = Math.max(1, Math.round(plotW)); tmp.height = rows;
+    tctx.imageSmoothingEnabled = false;
+    tctx.clearRect(0, 0, tmp.width, rows);
+    tctx.drawImage(off, 0, 0, vis.length, rows, 0, 0, tmp.width, rows);
+    ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+    if (style === 'filaments') ctx.globalAlpha = .30;
+    ctx.drawImage(tmp, 0, 0, tmp.width, rows, left, top, plotW, plotH);
+    ctx.globalAlpha = 1;
+  }
+
+  if (style === 'filaments') {
+    /* FILAMENTS : la base en retrait + les murs en traits laser, le langage de l'app */
+    const cw2 = plotW / vis.length, rh = plotH / rows;
+    for (let k = kLo; k <= kHi; k++) {
+      const y = top + (kHi - k + .5)*rh;
+      let i0 = -1;
+      for (let i = 0; i <= vis.length; i++) {
+        const v = i < vis.length ? (vis[i].bins.get(k) || 0) : 0;
+        const on = v > 0 && qOf(v) >= .55;
+        if (on && i0 < 0) i0 = i;
+        else if (!on && i0 >= 0) {
+          const q = qOf(vis[Math.max(i0, i-1)].bins.get(k) || 0);
+          ctx.strokeStyle = rgba(q >= .80 ? '#fff8e0' : GOLD_B, .35 + .6*q);
+          ctx.lineWidth = q >= .80 ? 2 : 1.2;
+          if (q >= .80) { ctx.shadowColor = GOLD_B; ctx.shadowBlur = 6; }
+          ctx.beginPath(); ctx.moveTo(left + i0*cw2, y); ctx.lineTo(left + i*cw2, y); ctx.stroke();
+          ctx.shadowBlur = 0; i0 = -1;
+        }
+      }
+    }
+  }
 
   /* échelle de prix réelle */
   ctx.fillStyle = '#7d795f'; ctx.font = '10px Consolas, monospace';
