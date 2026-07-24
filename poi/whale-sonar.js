@@ -104,7 +104,7 @@
       // la bougie, sans sillage, sans embrasement, sans ping. La pleine onde
       // de choc reste reservee aux bursts.
       if (n >= st.thrHi && shown())
-        waves.push({ tSec: T / 1000, price, side, born: performance.now(), mini: true });
+        waves.push({ tSec: T / 1000, price, side, born: performance.now(), mini: true, usd: n });
     } else if (now - lastDimBlipAt > 1200) {
       // meme cadence que le tick sonore doux : 1 point d'ambiance = 1 son
       lastDimBlipAt = now; addBlip(side, n, true);
@@ -123,7 +123,7 @@
     ping(side);                       // le son part meme onglet cache
     if (!shown()) return;             // pas de visuel accumule si rAF gele
     const tSec = T / 1000, now = performance.now();
-    waves.push({ tSec, price, side, born: now });
+    waves.push({ tSec, price, side, born: now, usd });
     scars.push({ tSec, side, born: now });
     const P = window.__gonPoi;
     if (P && gon) {
@@ -258,6 +258,19 @@
       if (!wv.mini) {
         cx.shadowBlur = 14; cx.fillStyle = `rgba(255,255,255,${al})`;
         cx.beginPath(); cx.arc(x, y, 2.4, 0, Math.PI * 2); cx.fill();
+      }
+      // ÉTIQUETTE du montant (demande Meddy : les échos sur bougie étaient
+      // muets — on ne savait pas à quoi ils correspondaient). Le notionnel
+      // s'affiche à côté de l'anneau, teinte du sens, et s'estompe avec lui.
+      if (wv.usd > 0) {
+        const lb = (wv.usd / 1e6).toFixed(wv.usd >= 1e7 ? 0 : 1) + "M";
+        cx.shadowBlur = 0;
+        cx.font = wv.mini ? "600 8px Consolas, monospace" : "700 10px Consolas, monospace";
+        cx.textAlign = "left"; cx.textBaseline = "middle";
+        cx.fillStyle = `rgba(0,0,0,${0.55 * al})`;   // fine ombre portée : lisible sur mèches
+        cx.fillText((wv.mini ? "" : "🐋 ") + lb, x + (wv.mini ? 9 : 13) + 1, y - (wv.mini ? 9 : 13) + 1);
+        cx.fillStyle = rgba(hue, Math.min(1, 1.25 * al));
+        cx.fillText((wv.mini ? "" : "🐋 ") + lb, x + (wv.mini ? 9 : 13), y - (wv.mini ? 9 : 13));
       }
       cx.restore();
     }
