@@ -357,6 +357,7 @@
       <button class="pbtn" id="propBold" title="Gras" hidden style="font-weight:700">G</button>
       <button class="pbtn" id="propItal" title="Italique" hidden style="font-style:italic">I</button>
       <button class="pbtn" id="propUnd" title="Souligné" hidden style="text-decoration:underline">S</button>
+      <button class="pbtn" id="propStrk" title="Barré" hidden style="text-decoration:line-through">B</button>
       <button class="pbtn" id="propBg" title="Fond (lisibilité sur les bougies)" hidden>▦</button>
       <div class="pdiv"></div>
       <button class="pbtn" id="propDup" title="Dupliquer">
@@ -2017,7 +2018,7 @@ const inPane = m => m.x <= paneW() && m.y <= paneH();
 const PALETTE = ['#f0d478','#d9b64d','#f2984d','#e0564d','#e04da8','#9b59e0','#4d8fe0','#3ecfd4','#4dc06a','#f5f5f0'];
 const DASHES = { solid: [], dash: [8,5], dot: [2,3] };
 let defaultStyle = { color: '#d9b64d', width: 1.5, dash: 'solid' };
-let textSize = 12, textBold = false, textItal = false, textUnd = false, textBg = false;   // réglages des PROCHAINS textes (mémorisés pour la session)
+let textSize = 12, textBold = false, textItal = false, textUnd = false, textStrk = false, textBg = false;   // réglages des PROCHAINS textes (mémorisés pour la session)
 /* types sémantiques du rectangle (doctrine) : label + couleur préréglée */
 const RKINDS = { ob: { label: 'OB', color: '#f0d478' }, acc: { label: 'ACC', color: '#f2984d' }, sd: { label: 'S/D', color: '#4d8fe0' } };
 let rectKind = '';        // type appliqué aux prochains rectangles tracés
@@ -2131,7 +2132,7 @@ function drawingOk(d) {
 function loadDrawings() {
   try {
     const arr = JSON.parse(localStorage.getItem('orion-draw-' + symbol));
-    const DKEYS = ['type', 't', 'price', 'a', 'b', 'pts', 'off', 'target', 'stop', 'color', 'width', 'dash', 'kind', 'tfk', 'text', 'size', 'bold', 'ital', 'und', 'bg'];
+    const DKEYS = ['type', 't', 'price', 'a', 'b', 'pts', 'off', 'target', 'stop', 'color', 'width', 'dash', 'kind', 'tfk', 'text', 'size', 'bold', 'ital', 'und', 'strk', 'bg'];
     drawings = (Array.isArray(arr) ? arr : []).map(d => {
       if (!d || typeof d !== 'object') return d;
       const c = {};   // whitelist : un champ parasite volumineux ne survit pas (quota, origine partagée)
@@ -2143,6 +2144,7 @@ function loadDrawings() {
         if (c.bold) c.bold = 1; else delete c.bold;   // booléens normalisés (jamais de valeur exotique dans ctx.font)
         if (c.ital) c.ital = 1; else delete c.ital;
         if (c.und) c.und = 1; else delete c.und;
+        if (c.strk) c.strk = 1; else delete c.strk;
         if (c.bg) c.bg = 1; else delete c.bg;
       }
       if (Array.isArray(c.pts) && c.pts.length > PTS_MAX) c.pts = c.pts.slice(0, PTS_MAX);
@@ -2341,12 +2343,13 @@ function syncPropbar() {
   // (texte sélectionné, ou outil Texte actif = taille des prochains textes).
   const textSel = !!(dSel && dSel.type === 'text');
   const textCtx = textSel || (sel == null && tool === 'text');
-  $('propSize').hidden = $('propBold').hidden = $('propItal').hidden = $('propUnd').hidden = $('propBg').hidden = !textCtx;
+  $('propSize').hidden = $('propBold').hidden = $('propItal').hidden = $('propUnd').hidden = $('propStrk').hidden = $('propBg').hidden = !textCtx;
   if (textCtx) {
     $('propSize').value = String(textSel ? (dSel.size || 12) : textSize);
     $('propBold').classList.toggle('on', textSel ? !!dSel.bold : textBold);
     $('propItal').classList.toggle('on', textSel ? !!dSel.ital : textItal);
     $('propUnd').classList.toggle('on', textSel ? !!dSel.und : textUnd);
+    $('propStrk').classList.toggle('on', textSel ? !!dSel.strk : textStrk);
     $('propBg').classList.toggle('on', textSel ? !!dSel.bg : textBg);
   }
   $('propStyle').hidden = !!rectCtx || posSel || alertSel || textCtx;
@@ -2384,6 +2387,12 @@ $('propUnd').onclick = () => {
   const d = textSelD();
   if (d) { if (d.und) delete d.und; else d.und = 1; saveDrawings(); invalidate(); }
   else textUnd = !textUnd;
+  syncPropbar();
+};
+$('propStrk').onclick = () => {
+  const d = textSelD();
+  if (d) { if (d.strk) delete d.strk; else d.strk = 1; saveDrawings(); invalidate(); }
+  else textStrk = !textStrk;
   syncPropbar();
 };
 TFS.forEach(t => {   // 1m → 1M ; nomenclature zones en préfixe : m1…m30, H1…H12, D1, D3, W1, M1
@@ -2436,7 +2445,8 @@ function commitTxtIn() {   // valide le texte en cours (Entrée, blur, ou re-cli
     if (editIdx != null) drawings[editIdx].text = v;
     else if (txtPos) drawings.push({ type: 'text', ...txtPos, ...defaultStyle, size: textSize,
       ...(textBold ? { bold: 1 } : {}), ...(textItal ? { ital: 1 } : {}),
-      ...(textUnd ? { und: 1 } : {}), ...(textBg ? { bg: 1 } : {}), text: v });
+      ...(textUnd ? { und: 1 } : {}), ...(textStrk ? { strk: 1 } : {}),
+      ...(textBg ? { bg: 1 } : {}), text: v });
     saveDrawings();
   }
   hideTxtIn();
@@ -2862,7 +2872,7 @@ function drawOne(d, isSel) {
     if (x != null && y != null) {
       const fs = d.size || 12;
       ctx.font = (d.ital ? 'italic ' : '') + (d.bold ? '700 ' : '') + fs + 'px Segoe UI';
-      const w = (d.bg || d.und) ? ctx.measureText(d.text).width : 0;
+      const w = (d.bg || d.und || d.strk) ? ctx.measureText(d.text).width : 0;
       if (d.bg) {   // cartouche de lisibilité : fond sombre + liseré à la couleur du texte
         ctx.shadowBlur = 0; ctx.setLineDash([]);
         ctx.fillStyle = 'rgba(8,7,4,.82)';
@@ -2871,10 +2881,13 @@ function drawOne(d, isSel) {
         ctx.strokeRect(x - 4, y - fs - 2, w + 8, fs + 8);
       }
       ctx.shadowBlur = Math.min(ambGlow, 2); ctx.fillStyle = col; ctx.fillText(d.text, x, y);
-      if (d.und) {   // soulignage à l'épaisseur proportionnelle à la police
+      if (d.und || d.strk) {   // soulignage / barré à l'épaisseur proportionnelle à la police
         ctx.shadowBlur = 0; ctx.setLineDash([]);
         ctx.strokeStyle = col; ctx.lineWidth = Math.max(1, fs / 12);
-        ctx.beginPath(); ctx.moveTo(x, y + 2.5); ctx.lineTo(x + w, y + 2.5); ctx.stroke();
+        ctx.beginPath();
+        if (d.und) { ctx.moveTo(x, y + 2.5); ctx.lineTo(x + w, y + 2.5); }
+        if (d.strk) { const ym = y - fs * 0.32; ctx.moveTo(x, ym); ctx.lineTo(x + w, ym); }   // mi-hauteur des minuscules
+        ctx.stroke();
       }
     }
   } else if (d.type === 'brush') {
