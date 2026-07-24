@@ -406,10 +406,22 @@
     }
   }
 
+  let cvdSig = "";
   function drawCvd() {
     const host = gon.mount.getBoundingClientRect();
     const w = Math.round(host.width), h = Math.round(host.height);
     if (w > 0 && h > 0 && (cvCvd.width !== w || cvCvd.height !== h)) { cvCvd.width = w; cvCvd.height = h; }
+    // P3 (audit 2026-07-24) : le CVD est STATIQUE entre deux pans/zooms/
+    // refetchs — le repeindre a 60 fps payait ~700 segments laser ombres par
+    // frame a vue figee. Signature de vue : on ne redessine que si quelque
+    // chose a reellement change (l'image precedente reste sinon).
+    let vr = "";
+    try { const r = gon.ts().getVisibleRange(); vr = r ? r.from + ":" + r.to : ""; } catch (_) {}
+    const sig = w + "x" + h + "|" + vr + "|" + cvdPts.length + "|" +
+      (cvdPts.length ? cvdPts[cvdPts.length - 1].cvd : 0) + "|" +
+      (lastFetchRange ? lastFetchRange.to : 0) + "|" + BUY + SELL;
+    if (sig === cvdSig) return;
+    cvdSig = sig;
     cxCvd.clearRect(0, 0, w, h);
     if (cvdPts.length < 2) return;
     // zone volume de G-Bot : scaleMargins top .85 -> le bandeau occupe ~15 %
@@ -448,17 +460,25 @@
     cxCvd.strokeStyle = "rgba(110,106,88,.22)"; cxCvd.lineWidth = 1;
     cxCvd.beginPath(); cxCvd.moveTo(0, y0); cxCvd.lineTo(w - 58, y0); cxCvd.stroke();
     cxCvd.setLineDash([]);
-    // trace LASER deux passes : halo large doux puis coeur net et brillant
-    for (let i = 1; i < pts.length; i++) {
-      const hue = pts[i].cvd >= pts[i - 1].cvd ? BUY : SELL;
-      cxCvd.shadowColor = hue; cxCvd.shadowBlur = 6;
-      cxCvd.strokeStyle = rgba(hue, 0.18); cxCvd.lineWidth = 2.4;
-      cxCvd.beginPath(); cxCvd.moveTo(pts[i - 1].x, yC(pts[i - 1].cvd));
-      cxCvd.lineTo(pts[i].x, yC(pts[i].cvd)); cxCvd.stroke();
-      cxCvd.shadowBlur = 2;
-      cxCvd.strokeStyle = rgba(hue, 0.75); cxCvd.lineWidth = 1;
-      cxCvd.beginPath(); cxCvd.moveTo(pts[i - 1].x, yC(pts[i - 1].cvd));
-      cxCvd.lineTo(pts[i].x, yC(pts[i].cvd)); cxCvd.stroke();
+    // trace LASER deux passes : halo large doux puis coeur net et brillant.
+    // P3 : batche PAR TEINTE — un stroke ombre par (passe, teinte), soit 4 au
+    // total, au lieu de 2 par segment (~1400 composites shadowBlur par frame).
+    // Geometrie identique : chaque segment reste un sous-chemin moveTo/lineTo.
+    for (const pass of [{ blur: 6, alpha: 0.18, lw: 2.4 }, { blur: 2, alpha: 0.75, lw: 1 }]) {
+      for (const hue of [BUY, SELL]) {
+        cxCvd.beginPath();
+        let any = false;
+        for (let i = 1; i < pts.length; i++) {
+          if ((pts[i].cvd >= pts[i - 1].cvd ? BUY : SELL) !== hue) continue;
+          cxCvd.moveTo(pts[i - 1].x, yC(pts[i - 1].cvd));
+          cxCvd.lineTo(pts[i].x, yC(pts[i].cvd));
+          any = true;
+        }
+        if (!any) continue;
+        cxCvd.shadowColor = hue; cxCvd.shadowBlur = pass.blur;
+        cxCvd.strokeStyle = rgba(hue, pass.alpha); cxCvd.lineWidth = pass.lw;
+        cxCvd.stroke();
+      }
     }
     cxCvd.shadowBlur = 0;
     cxCvd.fillStyle = "rgba(217,182,77,.50)"; cxCvd.font = "600 8px Segoe UI";
@@ -474,6 +494,7 @@
       // l'overlay doit etre efface — sinon il reste incruste et se desaligne.
       if (!hiddenCleared && cxCvd && cvCvd.width) {
         cxCvd.clearRect(0, 0, cvCvd.width, cvCvd.height);
+        cvdSig = "";   // P3 : le canvas vient d'etre vide — la signature ne doit pas faire sauter le redraw au retour
         hiddenCleared = true;
       }
       // On ARRETE la boucle rAF quand le panneau est masque (fenetre etroite) au

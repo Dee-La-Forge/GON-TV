@@ -13,6 +13,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const { politeFetch } = require("./http");
 const TF = 15 * 60 * 1000, FAPI = "https://fapi.binance.com";
 const FORWARD_WINDOW = 12, REACTION_ATR = 1, STOP_ATR = 1, ATR_PERIOD = 14;
 const MIN_GAP_CANDLES = 2;
@@ -20,14 +21,12 @@ const SYMBOL = (process.argv[2] || "BTCUSDT").toUpperCase();
 const ARCHIVE_FILE = SYMBOL === "BTCUSDT" ? "antho-v1-m15-pois.json" : `archive-${SYMBOL}-m15.json`;
 const TRAIN_END = Date.parse("2026-04-18T16:15:00Z");
 const VAL_END = Date.parse("2026-06-05T01:15:00Z");
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function fetchAllKlines(startMs, endMs) {
   const out = [];
   let cursor = startMs;
   while (cursor < endMs) {
-    await sleep(150);
-    const res = await fetch(`${FAPI}/fapi/v1/klines?symbol=${SYMBOL}&interval=15m&startTime=${cursor}&limit=1500`);
+    const res = await politeFetch(`${FAPI}/fapi/v1/klines?symbol=${SYMBOL}&interval=15m&startTime=${cursor}&limit=1500`);
     if (!res.ok) throw Error(`klines HTTP ${res.status}`);
     const rows = await res.json();
     if (!rows.length) break;

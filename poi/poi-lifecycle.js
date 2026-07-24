@@ -4,6 +4,16 @@
   const api = root.BiquettePoi = root.BiquettePoi || {};
   const TERMINAL = new Set(["MITIGATED", "INVALIDATED"]);
 
+  // Perf (audit 2026-07-24, P1) : createPoiConfig GELE sa sortie ; la
+  // re-executer PAR POI (validation ~40 cles + freeze) dominait le chemin de
+  // touche (~318 ms par flush sur les 54k POI de l'archive BTC). Une config
+  // deja gelee et complete est reprise telle quelle — tous les appelants
+  // passent une config sortie de createPoiConfig, la semantique est identique.
+  function resolveConfig(options) {
+    if (options && Object.isFrozen(options) && Number.isFinite(options.timeframeMs)) return options;
+    return api.createPoiConfig ? api.createPoiConfig(options) : options;
+  }
+
   function zoneTouched(poi, candle) {
     return candle.low <= poi.zoneHigh && candle.high >= poi.zoneLow;
   }
@@ -28,7 +38,7 @@
 
   function updatePoiLifecycle(poi, candle, options) {
     if (!poi || !candle || TERMINAL.has(poi.status)) return poi;
-    const config = api.createPoiConfig ? api.createPoiConfig(options) : options;
+    const config = resolveConfig(options);
     const candleTs = Number(candle.startTs ?? candle.timestamp);
     if (!Number.isFinite(candleTs)) return poi;
     if (Number.isFinite(poi.lifecycleValidAfterTs) && candleTs < poi.lifecycleValidAfterTs) return poi;
@@ -84,7 +94,7 @@
 
   function updatePoiTouch(poi, range, options) {
     if (!poi || !range || TERMINAL.has(poi.status)) return poi;
-    const config = api.createPoiConfig ? api.createPoiConfig(options) : options;
+    const config = resolveConfig(options);
     const timestamp = Number(range.timestamp);
     const high = Number(range.high);
     const low = Number(range.low);
@@ -128,12 +138,12 @@
   }
 
   function updatePoiTouches(pois, range, options) {
-    const config = api.createPoiConfig ? api.createPoiConfig(options) : options;
+    const config = resolveConfig(options);
     return (pois || []).map((poi) => updatePoiTouch(poi, range, config));
   }
 
   function updatePoiList(pois, candle, options) {
-    const config = api.createPoiConfig ? api.createPoiConfig(options) : options;
+    const config = resolveConfig(options);
     const updated = (pois || []).map((poi) => updatePoiLifecycle(poi, candle, config));
     const canonical = updated.filter((poi) => poi.provenance === "antho_v1_canonical");
     const live = updated.filter((poi) => poi.provenance !== "antho_v1_canonical")

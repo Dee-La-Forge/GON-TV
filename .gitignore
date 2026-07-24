@@ -1,2 +1,5 @@
 poi/.archive.lock
 poi/*.tmp
+poi/*.preview.json
+tools/parity-report.json
+tools/v3-dataset.json

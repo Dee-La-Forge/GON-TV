@@ -2835,6 +2835,9 @@ loadDrawings();
 window.__gon = {
   chart, series, ts,
   get symbol() { return symbol; },
+  // Source UNIQUE de la liste des symboles (audit 2026-07-24, H2) : whale-sonar
+  // en dérive sa couverture — plus de liste jumelle qui diverge en silence.
+  symbols: SYMBOLS.map(s => s[0]),
   get tf() { return tf; },
   get tfSec() { return tfDef().sec; },
   get theme() { return theme; },
@@ -2954,14 +2957,22 @@ if ('serviceWorker' in navigator && location.hostname.endsWith('github.io')) nav
 (() => {
   if (!location.hostname.endsWith('github.io')) return;
   const sig = (html) => (html.match(/\.js\?v=\d+/g) || []).sort().join('|');
-  const current = sig(document.documentElement.outerHTML);
-  if (!current) return;
+  // (audit 2026-07-24, M5) : ce script inline BLOQUANT s'exécute avant que les
+  // balises poi/*.js?v= existent dans le DOM — calculer la signature ici la
+  // rendait vide et désarmait TOUTE la veille, silencieusement. On la fige au
+  // premier tick (DOM complet depuis longtemps à +5 min).
+  let current = null;
   let lastInput = Date.now();
   for (const ev of ['pointerdown', 'keydown', 'wheel', 'touchstart'])
     window.addEventListener(ev, () => { lastInput = Date.now(); }, { passive: true, capture: true });
   let stale = false;
   setInterval(async () => {
     try {
+      if (current == null) {
+        const s = sig(document.documentElement.outerHTML);
+        if (!s) return;   // introuvable (structure changée) : on retentera, jamais de reload à signature vide
+        current = s;
+      }
       if (!stale) {
         const res = await fetch(location.pathname + '?vchk=' + Date.now(), { cache: 'no-store' });
         if (!res.ok) return;
@@ -2977,12 +2988,12 @@ if ('serviceWorker' in navigator && location.hostname.endsWith('github.io')) nav
 <script src="poi/poi-score-model.js?v=1"></script>
 <script src="poi/footprint-m15.js?v=2"></script>
 <script src="poi/poi-detector.js?v=3"></script>
-<script src="poi/poi-lifecycle.js?v=7"></script>
+<script src="poi/poi-lifecycle.js?v=8"></script>
 <script src="poi/stream.js?v=1"></script>
-<script src="poi/poi-render.js?v=72"></script>
-<script src="poi/poi-feature.js?v=46"></script>
-<script src="poi/liq-flux.js?v=41"></script>
-<script src="poi/whale-sonar.js?v=31"></script>
-<script src="poi/confluence.js?v=33"></script>
+<script src="poi/poi-render.js?v=73"></script>
+<script src="poi/poi-feature.js?v=47"></script>
+<script src="poi/liq-flux.js?v=42"></script>
+<script src="poi/whale-sonar.js?v=32"></script>
+<script src="poi/confluence.js?v=34"></script>
 </body>
 </html>

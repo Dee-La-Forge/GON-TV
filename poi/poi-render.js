@@ -84,6 +84,24 @@
     const ctx = cv.getContext("2d");
 
     let pois = [], prov = null, visible = true, dpr = 1, showConsumed = false, minScore = 0, climaxOnly = false;
+    // P2 (audit 2026-07-24) : pre-index reconstruit a chaque setPois — les
+    // boucles de paint ne re-parcourent plus les ~54k POI de l'archive a
+    // chaque frame. Tri par score DESC : les filtres de seuil deviennent des
+    // break (en vue FORT, seul le prefixe >= 80 est visite).
+    let aliveIdx = [], deadIdx = [], ghostIdx = [], winIdx = [];
+    function reindex() {
+      aliveIdx = []; deadIdx = []; ghostIdx = []; winIdx = [];
+      for (const p of pois) {
+        if (p.status === "ACTIVE_UNTOUCHED") aliveIdx.push(p);
+        else {
+          deadIdx.push(p);
+          if ((p.score || 0) >= GHOST_MIN_SCORE) ghostIdx.push(p);
+        }
+        if ((p.win === 1 || p.win === 0) && (p.firstTouchTs ?? p.statusChangedTs)) winIdx.push(p);
+      }
+      const byScore = (a, b) => (b.score || 0) - (a.score || 0);
+      aliveIdx.sort(byScore); deadIdx.sort(byScore); ghostIdx.sort(byScore);
+    }
     // Seuil de score SEPARE pour les niveaux MORTS : le score sert a desencombrer
     // les morts (tres nombreux), PAS a cacher les vivants (peu, actionnables).
     // minScore filtre les VIVANTS, deadMinScore filtre les MORTS.
@@ -171,6 +189,26 @@
       // ferait disparaitre des qu'on scrolle sa bougie de naissance hors ecran.
       const endSec = active ? now / 1000 : anchorSec(poi, poi.firstTouchTs ?? poi.statusChangedTs ?? now);
       return startSec <= vis.to && Math.max(endSec, startSec) >= vis.from;
+    }
+
+    // M4 (audit 2026-07-24) : en REPLAY, le statut affiche est celui du moment
+    // REJOUE, pas celui d'aujourd'hui — sinon l'outil d'entrainement montre
+    // quels niveaux vont mourir (meme classe de fuite que la garde ✦).
+    //   0 = statut inchange ; 1 = pas encore touche au curseur (rendre VIVANT) ;
+    //   2 = touche mais pas encore mort au curseur (rendre TOUCHED).
+    function replayResState(poi, cutMs) {
+      if (!cutMs || poi.status === "ACTIVE_UNTOUCHED") return 0;
+      const first = poi.firstTouchTs ?? poi.statusChangedTs ?? 0;
+      if (first > cutMs) return 1;
+      const last = poi.statusChangedTs ?? first;
+      return (poi.status !== "TOUCHED" && last > cutMs) ? 2 : 0;
+    }
+    // Clone UNIQUEMENT au moment d'entrer dans `shown` (borne par la vue) —
+    // jamais par POI du fichier.
+    function replayResurrect(poi, r) {
+      return r === 1
+        ? Object.assign({}, poi, { status: "ACTIVE_UNTOUCHED", firstTouchTs: null, statusChangedTs: null, touchCount: 0, maxPenetrationPct: 0 })
+        : Object.assign({}, poi, { status: "TOUCHED", statusChangedTs: poi.firstTouchTs ?? poi.statusChangedTs });
     }
 
     // --- primitives de dessin ------------------------------------------------
@@ -687,6 +725,16 @@
       // hierarchie au creux.
       pulseK = 1.0 + 0.80 * Math.sin(now * 0.0031);
       const vis = visibleRangeSec();
+      // M4 : curseur du replay = derniere bougie de la tranche rejouee (le
+      // seam sert dataNow par reference — live: candles, replay: tranche).
+      let replayCutMs = 0;
+      if (gon.replay) {
+        try {
+          const d = gon.dataNow();
+          const t = d && d.length ? Number(d[d.length - 1].time) : NaN;
+          if (Number.isFinite(t) && t > 0) replayCutMs = t * 1000;
+        } catch (_) {}
+      }
       ctx.save();
       try {
         ctx.scale(dpr, dpr);
@@ -700,11 +748,12 @@
         // sans surcharge. Tres pale ; le detail naissance->mort est trace apres.
         if (showConsumed) {
           const ghostSeen = new Set();
+          const ghostFloor = Math.max(deadMinScore, GHOST_MIN_SCORE);
           ctx.save(); ctx.lineCap = "butt"; ctx.setLineDash(DASH.dead); ctx.lineWidth = W.dead;
-          for (const poi of pois) {
-            if (poi.status === "ACTIVE_UNTOUCHED") continue;
+          for (const poi of ghostIdx) {   // P2 : index morts >= GHOST_MIN_SCORE, trie par score desc
+            if ((poi.score || 0) < ghostFloor) break;   // tri desc : plus rien d'eligible apres
             if (climaxOnly && !poi.climax) continue;
-            if ((poi.score || 0) < Math.max(deadMinScore, GHOST_MIN_SCORE)) continue;   // fantome = morts a score eleve
+            if (replayCutMs && replayResState(poi, replayCutMs) === 1) continue;   // M4 : pas encore touche au moment rejoue
             const lvl = refPrice(poi);
             if (!(lvl >= pLo && lvl <= pHi)) continue;
             const key = Math.round(lvl * 1e6);
@@ -720,13 +769,38 @@
         }
 
         let shown = [];
-        for (const poi of pois) {
+        // P2 : vivants et morts visites separement depuis les index tries par
+        // score desc — les seuils deviennent des break, plus de scan des 54k.
+        for (const poi of aliveIdx) {
+          if ((poi.score || 0) < minScore) break;
           if (climaxOnly && !poi.climax) continue;   // vue climax : bougies a volume dominant
-          const isDead = poi.status !== "ACTIVE_UNTOUCHED";
+          const lvl = refPrice(poi);
+          if (!(lvl >= pLo && lvl <= pHi)) continue;
+          if (vis && !intersectsView(poi, vis, now)) continue;
+          shown.push(poi);
+        }
+        const deadFloor = Math.min(minScore, deadMinScore);
+        for (const poi0 of deadIdx) {
+          if ((poi0.score || 0) < deadFloor) break;   // sous les DEUX seuils : rien d'eligible apres
+          if (climaxOnly && !poi0.climax) continue;
+          // M4 : statut au moment rejoue — un niveau pas encore touche au
+          // curseur du replay est montre VIVANT, un touche-pas-encore-mort en
+          // TOUCHED. Le clone n'est cree que pour les POI qui entrent en vue.
+          const res = replayCutMs ? replayResState(poi0, replayCutMs) : 0;
+          if (res === 1) {
+            if ((poi0.score || 0) < minScore) continue;
+            const lvl = refPrice(poi0);
+            if (!(lvl >= pLo && lvl <= pHi)) continue;
+            const poi = replayResurrect(poi0, 1);
+            if (vis && !intersectsView(poi, vis, now)) continue;
+            shown.push(poi);
+            continue;
+          }
+          const poi = res === 2 ? replayResurrect(poi0, 2) : poi0;
           // Mort recent (live) : visible partout, au seuil du curseur.
-          const recentDead = isDead && now - (poi.firstTouchTs ?? poi.statusChangedTs ?? 0) < RECENT_DEAD_MS;
-          if ((poi.score || 0) < (isDead ? (recentDead ? minScore : deadMinScore) : minScore)) continue;   // seuils separes morts/vivants
-          if (!showConsumed && isDead && !recentDead) continue;
+          const recentDead = now - (poi.firstTouchTs ?? poi.statusChangedTs ?? 0) < RECENT_DEAD_MS;
+          if ((poi.score || 0) < (recentDead ? minScore : deadMinScore)) continue;   // seuils separes morts/vivants
+          if (!showConsumed && !recentDead) continue;
           const lvl = refPrice(poi);
           if (!(lvl >= pLo && lvl <= pHi)) continue;
           if (vis && !intersectsView(poi, vis, now)) continue;
@@ -802,8 +876,7 @@
       // les perdus dessinables comptent pour le %.
       const pts = [];
       let l = 0;
-      for (const p of pois) {
-        if (p.win !== 1 && p.win !== 0) continue;
+      for (const p of winIdx) {   // P2 : index des verdicts, pas le fichier entier
         const t = p.firstTouchTs ?? p.statusChangedTs;
         if (!t) continue;
         const sec = anchorSec(p, t);
@@ -876,7 +949,7 @@
     rafId = requestAnimationFrame(tick);
 
     return {
-      setPois(list) { pois = Array.isArray(list) ? list : []; mark(); },
+      setPois(list) { pois = Array.isArray(list) ? list : []; reindex(); mark(); },
       setProvisional(p) { prov = p || null; mark(); },
       setRightInset(px) { rightInset = Math.max(0, Number(px) || 0); mark(); },
       setVisible(v) { visible = !!v; mark(); },

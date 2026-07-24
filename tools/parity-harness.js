@@ -26,13 +26,13 @@ require("../poi/poi-detector.js");
 
 const fs = require("fs");
 const path = require("path");
+const { politeFetch } = require("./http");
 const B = global.BiquettePoi;
 
 const FAPI = "https://fapi.binance.com";
 const TF = 15 * 60 * 1000;
 const SYMBOL = "BTCUSDT";
 const MAX_PAGES = 120;
-const THROTTLE_MS = 120;
 
 const nRecent = parseInt(process.argv[2], 10) || 8;
 const nOld = parseInt(process.argv[3], 10) || 3;
@@ -72,17 +72,10 @@ for (let ts = lastTs - 3 * 24 * 3600 * 1000; ts < lastTs; ts += TF) {
 const negatives = sample(negPool, nNeg);
 
 // --- réseau ----------------------------------------------------------------
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// Invariant README : tout appel fapi passe par politeFetch (cadence globale
+// partagée + Retry-After) — le throttle maison 120 ms violait le budget.
 async function fetchJson(url) {
-  await sleep(THROTTLE_MS);
-  const res = await fetch(url);
-  if (res.status === 429 || res.status === 418) {
-    process.stdout.write("  [rate-limit, pause 30s]\n");
-    await sleep(30000);
-    const retry = await fetch(url);
-    if (!retry.ok) throw Error(`HTTP ${retry.status} après retry`);
-    return retry.json();
-  }
+  const res = await politeFetch(url);
   if (!res.ok) throw Error(`HTTP ${res.status}`);
   return res.json();
 }

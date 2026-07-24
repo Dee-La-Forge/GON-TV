@@ -151,6 +151,19 @@
   // reste true : rAF et visuels tourneraient pour un panneau invisible.
   function panelShown() { return visible && panel && panel.offsetParent !== null; }
 
+  // M6 (audit 2026-07-24) : le plafond de 50 etait PARTAGE ambiance/meteores —
+  // sous cascade tous-marches, l'ambiance (sans throttle de cadence) saturait
+  // seule le plafond et supprimait les meteores du symbole AFFICHE au moment
+  // le plus interessant. Quotas separes + un meteore evince la plus vieille
+  // orbe d'ambiance quand le canal est plein.
+  const ORB_CAP = 50, DIM_CAP = 35;
+  function dimCount() { let n = 0; for (const o of orbs) if (o.dim) n++; return n; }
+  function evictOldestDim() {
+    for (let i = 0; i < orbs.length; i++) {
+      if (orbs[i].dim) { const o = orbs[i]; orbs.splice(i, 1); freeOrb(o); return; }
+    }
+  }
+
   function pushEvent(side, usd, at) {
     events.push({ side, usd, at });
     // Visuels UNIQUEMENT quand le panneau est affiche : masque, rien ne les
@@ -158,7 +171,8 @@
     if (panelShown()) {
       // Rampe log ACCENTUEE (dans createOrb) : petites liq discretes, grosses
       // spectaculaires jusqu'a ~44 px + particules satellites au-dela de 5M$.
-      if (orbs.length < 50) {
+      if (orbs.length >= ORB_CAP) evictOldestDim();   // M6 : le meteore prime sur l'ambiance
+      if (orbs.length < ORB_CAP) {
         createOrb(side, usd, false);
       }
       waves.push({ side, x: -60, v: 9 + Math.log10(usd), w: 30 + (Math.log10(usd) - 4) * 34 });
@@ -183,7 +197,7 @@
     // Autres symboles : petites boules d'AMBIANCE dans le canal uniquement —
     // tamisees, sans ping ni onde, hors compteurs/journal (qui restent la
     // verite du symbole affiche). Le canal vit au rythme du marche entier.
-    if (panelShown() && orbs.length < 50) {
+    if (panelShown() && orbs.length < ORB_CAP && dimCount() < DIM_CAP) {   // M6 : quota propre a l'ambiance
       createOrb(side, usd, true);   // dims en px CSS dans createOrb (audit retina conserve)
     }
   }

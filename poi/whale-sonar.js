@@ -1,7 +1,8 @@
 (function () {
   "use strict";
 
-  /* G-ON SONAR — detection de baleines sur le flux aggTrade des 20 symboles.
+  /* G-ON SONAR — detection de baleines sur le flux aggTrade de TOUS les
+   * symboles du selecteur (liste derivee du seam window.__gon.symbols).
    * Design valide par maquette (maquette-baleines.html) :
    *   - onde de choc laser au point d'impact d'un BURST (>=3 prints extremes
    *     meme sens en 5 s) sur le symbole affiche ;
@@ -16,9 +17,15 @@
    * Module independant : son propre socket combine, aucun couplage moteur POI
    * (lecture seule de window.__gonPoi.pois() pour l'embrasement). */
 
-  const SYMS = ["BTCUSDT","ETHUSDT","SOLUSDT","BNBUSDT","XRPUSDT","DOGEUSDT","ADAUSDT",
-    "LINKUSDT","APTUSDT","ARBUSDT","OPUSDT","SUIUSDT","FILUSDT","INJUSDT","ETCUSDT",
-    "AAVEUSDT","WLDUSDT","TIAUSDT","1000PEPEUSDT","1000SHIBUSDT"];
+  // Couverture = la liste du sélecteur, via le seam (audit 2026-07-24, H2 :
+  // la liste jumelle de 20 entrées omettait AVAX/DOT/TRX/LTC/BCH/NEAR/ATOM/UNI
+  // — radar actif en apparence mais aucun print possible sur ces symboles).
+  // Repli sur l'ancienne liste si le seam n'expose pas encore `symbols`.
+  const SYMS = (window.__gon && Array.isArray(window.__gon.symbols) && window.__gon.symbols.length)
+    ? window.__gon.symbols.slice()
+    : ["BTCUSDT","ETHUSDT","SOLUSDT","BNBUSDT","XRPUSDT","DOGEUSDT","ADAUSDT",
+       "LINKUSDT","APTUSDT","ARBUSDT","OPUSDT","SUIUSDT","FILUSDT","INJUSDT","ETCUSDT",
+       "AAVEUSDT","WLDUSDT","TIAUSDT","1000PEPEUSDT","1000SHIBUSDT"];
   const WS_URL = "wss://fstream.binance.com/market/stream?streams=" +
     SYMS.map((s) => s.toLowerCase() + "@aggTrade").join("/");
   const STALL_MS = 25000;            // flux all-market : 25 s de silence = socket morte

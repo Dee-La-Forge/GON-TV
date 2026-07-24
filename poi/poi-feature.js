@@ -271,7 +271,12 @@
     // englobant la cloture (high >= close >= low), B.clusterSwept couvre
     // aussi les invalidations par cloture (ex-audit O1). Early-return sur les
     // POI terminaux : le rejeu reste borne malgre les ~9400 canoniques.
-    const ageCandles = poiHistory.filter((c) => c.startTs > poiCanonicalValidAfter);
+    // >= (audit 2026-07-24, M2) : la regen s'arrete a une frontiere de bougie
+    // exacte (minuit UTC) — le > strict excluait la bougie startTs ===
+    // poiCanonicalValidAfter du rejeu alors que la garde interne du lifecycle
+    // (candleTs < lifecycleValidAfterTs) l'aurait traitee : un balayage/cassure
+    // survenu dans CETTE bougie laissait un zombie affiche jusqu'a la regen.
+    const ageCandles = poiHistory.filter((c) => c.startTs >= poiCanonicalValidAfter);
     if (ageCandles.length) {
       const seedLo = Math.min.apply(null, ageCandles.map((c) => c.low));
       const seedHi = Math.max.apply(null, ageCandles.map((c) => c.high));
@@ -545,10 +550,12 @@
   let poiProvisionalSeenTrade, poiProvisionalSeenBucket = 0;
 
   // Seuil de silence adaptatif : 10 s pour BTC/ETH (flux continu garanti),
-  // 60 s pour les symboles generalises par binSizeForPrice — un altcoin calme
-  // passe >10 s sans trade et le watchdog recyclerait une socket SAINE en
-  // boucle (churn reseau + provisoire detruit a tort).
-  const stallLimitMs = () => POI_SYMBOL_CONFIG[poiTicker] ? POI_STREAM_STALL_MS : 60000;
+  // 60 s pour tous les autres — un altcoin calme passe >10 s sans trade et le
+  // watchdog recyclerait une socket SAINE en boucle (churn reseau + provisoire
+  // detruit a tort). (Audit 2026-07-24, M3 : le test POI_SYMBOL_CONFIG[...]
+  // matchait les 20 symboles depuis que la table a grandi de 2 a 20 — le
+  // commentaire decrivait l'intention, pas le code.)
+  const stallLimitMs = () => (poiTicker === "BTCUSDT" || poiTicker === "ETHUSDT") ? POI_STREAM_STALL_MS : 60000;
   const isStreamLive = () => !!(poiSocket && poiSocket.readyState === 1
     && poiLastMessageAt && (Date.now() - poiLastMessageAt) < stallLimitMs());
 
@@ -646,6 +653,9 @@
     poiProvisionalSeenTrade = undefined; poiProvisionalSeenBucket = 0;
     poiAccumulator?.reset(); poiAccumulator = null;
     poiTicker = ""; poiLastTradeId = null; poiHistoricalCutoff = 0; poiCanonicalValidAfter = 0;
+    // (audit 2026-07-24, M1) : sans ce reset, un echec d'archive du symbole
+    // SUIVANT laissait calibrer ses POI sur l'histogramme de l'ANCIEN symbole.
+    poiScoreCal = null;
     pois = []; poiHistory = []; refresh();
   }
 
