@@ -182,6 +182,7 @@
     width: 26px; height: 26px; border-radius: 4px; display: flex; align-items: center; justify-content: center;
   }
   #propbar .pbtn:hover { border-color: var(--gold-d); box-shadow: 0 0 8px rgba(217,182,77,.2); }
+  #propbar .pbtn.on { color: #060604; background: linear-gradient(180deg, var(--gold-b), var(--gold)); font-weight: 700; }
   #propbar .pbtn svg { width: 14px; height: 14px; }
   #propbar .pdiv { width: 1px; height: 20px; background: var(--border); }
   #swatches { display: flex; gap: 5px; }
@@ -353,6 +354,8 @@
         <option value="20">20 px</option><option value="24">24 px</option>
         <option value="32">32 px</option><option value="48">48 px</option>
       </select>
+      <button class="pbtn" id="propBold" title="Gras" hidden style="font-weight:700">G</button>
+      <button class="pbtn" id="propBg" title="Fond (lisibilité sur les bougies)" hidden>▦</button>
       <div class="pdiv"></div>
       <button class="pbtn" id="propDup" title="Dupliquer">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="8" y="8" width="12" height="12" rx="1.5"/><path d="M16 4H5.5A1.5 1.5 0 004 5.5V16"/></svg>
@@ -2012,7 +2015,7 @@ const inPane = m => m.x <= paneW() && m.y <= paneH();
 const PALETTE = ['#f0d478','#d9b64d','#f2984d','#e0564d','#e04da8','#9b59e0','#4d8fe0','#3ecfd4','#4dc06a','#f5f5f0'];
 const DASHES = { solid: [], dash: [8,5], dot: [2,3] };
 let defaultStyle = { color: '#d9b64d', width: 1.5, dash: 'solid' };
-let textSize = 12;   // taille des PROCHAINS textes (l'outil Texte mémorise le dernier choix)
+let textSize = 12, textBold = false, textBg = false;   // réglages des PROCHAINS textes (mémorisés pour la session)
 /* types sémantiques du rectangle (doctrine) : label + couleur préréglée */
 const RKINDS = { ob: { label: 'OB', color: '#f0d478' }, acc: { label: 'ACC', color: '#f2984d' }, sd: { label: 'S/D', color: '#4d8fe0' } };
 let rectKind = '';        // type appliqué aux prochains rectangles tracés
@@ -2126,14 +2129,18 @@ function drawingOk(d) {
 function loadDrawings() {
   try {
     const arr = JSON.parse(localStorage.getItem('orion-draw-' + symbol));
-    const DKEYS = ['type', 't', 'price', 'a', 'b', 'pts', 'off', 'target', 'stop', 'color', 'width', 'dash', 'kind', 'tfk', 'text', 'size'];
+    const DKEYS = ['type', 't', 'price', 'a', 'b', 'pts', 'off', 'target', 'stop', 'color', 'width', 'dash', 'kind', 'tfk', 'text', 'size', 'bold', 'bg'];
     drawings = (Array.isArray(arr) ? arr : []).map(d => {
       if (!d || typeof d !== 'object') return d;
       const c = {};   // whitelist : un champ parasite volumineux ne survit pas (quota, origine partagée)
       for (const k of DKEYS) if (d[k] !== undefined) c[k] = d[k];
       // héritage pré-bornes : tronquer plutôt que perdre silencieusement
       if (typeof c.text === 'string' && c.text.length > TEXT_MAX) c.text = c.text.slice(0, TEXT_MAX);
-      if (c.type === 'text') c.size = numOk(c.size) ? Math.max(8, Math.min(72, c.size)) : 12;   // taille bornée (entrée corrompue = police géante sinon)
+      if (c.type === 'text') {
+        c.size = numOk(c.size) ? Math.max(8, Math.min(72, c.size)) : 12;   // taille bornée (entrée corrompue = police géante sinon)
+        if (c.bold) c.bold = 1; else delete c.bold;   // booléens normalisés (jamais de valeur exotique dans ctx.font)
+        if (c.bg) c.bg = 1; else delete c.bg;
+      }
       if (Array.isArray(c.pts) && c.pts.length > PTS_MAX) c.pts = c.pts.slice(0, PTS_MAX);
       return c;
     }).filter(drawingOk);
@@ -2330,20 +2337,37 @@ function syncPropbar() {
   // (texte sélectionné, ou outil Texte actif = taille des prochains textes).
   const textSel = !!(dSel && dSel.type === 'text');
   const textCtx = textSel || (sel == null && tool === 'text');
-  $('propSize').hidden = !textCtx;
-  if (textCtx) $('propSize').value = String(textSel ? (dSel.size || 12) : textSize);
+  $('propSize').hidden = $('propBold').hidden = $('propBg').hidden = !textCtx;
+  if (textCtx) {
+    $('propSize').value = String(textSel ? (dSel.size || 12) : textSize);
+    $('propBold').classList.toggle('on', textSel ? !!dSel.bold : textBold);
+    $('propBg').classList.toggle('on', textSel ? !!dSel.bg : textBg);
+  }
   $('propStyle').hidden = !!rectCtx || posSel || alertSel || textCtx;
   $('propWidth').hidden = posSel || textCtx;
   $('propColor').hidden = posSel;
   $('swatches').hidden = posSel;
 }
+const textSelD = () => sel != null && drawings[sel] && drawings[sel].type === 'text' ? drawings[sel] : null;
 $('propSize').addEventListener('change', e => {
   const v = Math.max(8, Math.min(72, +e.target.value || 12));
-  const d = sel != null && drawings[sel] && drawings[sel].type === 'text' ? drawings[sel] : null;
+  const d = textSelD();
   if (d) { d.size = v; saveDrawings(); invalidate(); }
   else textSize = v;   // mémorisée pour les prochains textes de la session
   syncPropbar();
 });
+$('propBold').onclick = () => {
+  const d = textSelD();
+  if (d) { if (d.bold) delete d.bold; else d.bold = 1; saveDrawings(); invalidate(); }
+  else textBold = !textBold;
+  syncPropbar();
+};
+$('propBg').onclick = () => {
+  const d = textSelD();
+  if (d) { if (d.bg) delete d.bg; else d.bg = 1; saveDrawings(); invalidate(); }
+  else textBg = !textBg;
+  syncPropbar();
+};
 TFS.forEach(t => {   // 1m → 1M ; nomenclature zones en préfixe : m1…m30, H1…H12, D1, D3, W1, M1
   const o = document.createElement('option');
   o.value = t; o.textContent = zLabel(t);
@@ -2392,7 +2416,8 @@ function commitTxtIn() {   // valide le texte en cours (Entrée, blur, ou re-cli
   const v = t.value.trim().slice(0, TEXT_MAX);   // même borne que drawingOk : jamais de tracé qui périra au rechargement
   if (v) {
     if (editIdx != null) drawings[editIdx].text = v;
-    else if (txtPos) drawings.push({ type: 'text', ...txtPos, ...defaultStyle, size: textSize, text: v });
+    else if (txtPos) drawings.push({ type: 'text', ...txtPos, ...defaultStyle, size: textSize,
+      ...(textBold ? { bold: 1 } : {}), ...(textBg ? { bg: 1 } : {}), text: v });
     saveDrawings();
   }
   hideTxtIn();
@@ -2589,7 +2614,7 @@ function hitTest(mx, my) {
       const [x, y] = px(d);
       if (x != null && y != null) {
         const fs = d.size || 12;   // zone de clic à l'échelle de la police (taille réglable)
-        ctx.font = fs + 'px Segoe UI'; const w = ctx.measureText(d.text).width;
+        ctx.font = (d.bold ? '700 ' : '') + fs + 'px Segoe UI'; const w = ctx.measureText(d.text).width;
         hit = mx > x - 4 && mx < x + w + 4 && my > y - fs - 2 && my < y + 6;
       }
     }
@@ -2815,7 +2840,19 @@ function drawOne(d, isSel) {
     }
   } else if (d.type === 'text') {
     const [x, y] = px(d);
-    if (x != null && y != null) { ctx.shadowBlur = Math.min(ambGlow, 2); ctx.fillStyle = col; ctx.font = (d.size || 12) + 'px Segoe UI'; ctx.fillText(d.text, x, y); }
+    if (x != null && y != null) {
+      const fs = d.size || 12;
+      ctx.font = (d.bold ? '700 ' : '') + fs + 'px Segoe UI';
+      if (d.bg) {   // cartouche de lisibilité : fond sombre + liseré à la couleur du texte
+        const w = ctx.measureText(d.text).width;
+        ctx.shadowBlur = 0; ctx.setLineDash([]);
+        ctx.fillStyle = 'rgba(8,7,4,.82)';
+        ctx.fillRect(x - 4, y - fs - 2, w + 8, fs + 8);
+        ctx.strokeStyle = hexToRgba(col, .55); ctx.lineWidth = 1;
+        ctx.strokeRect(x - 4, y - fs - 2, w + 8, fs + 8);
+      }
+      ctx.shadowBlur = Math.min(ambGlow, 2); ctx.fillStyle = col; ctx.fillText(d.text, x, y);
+    }
   } else if (d.type === 'brush') {
     ctx.beginPath();
     let started = false;
