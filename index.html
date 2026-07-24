@@ -2332,8 +2332,8 @@ function syncPropbar() {
   const textCtx = textSel || (sel == null && tool === 'text');
   $('propSize').hidden = !textCtx;
   if (textCtx) $('propSize').value = String(textSel ? (dSel.size || 12) : textSize);
-  $('propStyle').hidden = !!rectCtx || posSel || alertSel || textSel;
-  $('propWidth').hidden = posSel || textSel;
+  $('propStyle').hidden = !!rectCtx || posSel || alertSel || textCtx;
+  $('propWidth').hidden = posSel || textCtx;
   $('propColor').hidden = posSel;
   $('swatches').hidden = posSel;
 }
