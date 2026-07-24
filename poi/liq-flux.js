@@ -564,7 +564,26 @@
   let oiHist = [], markHist = [], fundRate = null, fundNext = 0;
   let lastOiPoll = 0, lastPremPoll = 0;
   const oiEls = {};
-  function resetOi() { oiHist = []; markHist = []; fundRate = null; fundNext = 0; lastOiPoll = 0; lastPremPoll = 0; }
+  // Historique PERSISTANT (constaté en réel : chaque rechargement d'écran —
+  // veille de version incluse — remettait la fenêtre 15' à zéro, l'OI restait
+  // « — » en permanence les jours de déploiements).
+  const oiKey = () => "gon.oi." + curSymbol;
+  function saveOiHist() {
+    try { localStorage.setItem(oiKey(), JSON.stringify({ oi: oiHist, mark: markHist, fr: fundRate, fn: fundNext, t: Date.now() })); } catch (_) {}
+  }
+  function resetOi() {
+    oiHist = []; markHist = []; fundRate = null; fundNext = 0; lastOiPoll = 0; lastPremPoll = 0;
+    try {   // recharge la fenêtre du symbole si elle est encore fraîche
+      const o = JSON.parse(localStorage.getItem(oiKey()) || "null");
+      if (o && Date.now() - o.t < 10 * 60e3) {
+        const cut = Date.now() - 16 * 60e3;
+        oiHist = (o.oi || []).filter((h) => h.t >= cut);
+        markHist = (o.mark || []).filter((h) => h.t >= cut);
+        if (Number.isFinite(o.fr)) fundRate = o.fr;
+        if (Number.isFinite(o.fn)) fundNext = o.fn;
+      }
+    } catch (_) {}
+  }
   function histDelta(hist) {   // Δ% vs l'échantillon d'il y a >= 15 min (null si fenêtre incomplète)
     const cut = Date.now() - 15 * 60e3;
     let ref = null;
@@ -584,7 +603,7 @@
         .then((j) => {
           if (!j || sym !== curSymbol) return;
           const v = Number(j.openInterest);
-          if (v > 0) { oiHist.push({ t: Date.now(), v }); if (oiHist.length > 120) oiHist.shift(); }
+          if (v > 0) { oiHist.push({ t: Date.now(), v }); if (oiHist.length > 120) oiHist.shift(); saveOiHist(); }
         }).catch(() => {});
     }
     if (n - lastPremPoll >= 30000) {
@@ -597,6 +616,7 @@
           if (mp > 0) { markHist.push({ t: Date.now(), v: mp }); if (markHist.length > 60) markHist.shift(); }
           fundRate = Number(j.lastFundingRate);
           fundNext = Number(j.nextFundingTime) || 0;
+          saveOiHist();
         }).catch(() => {});
     }
   }
