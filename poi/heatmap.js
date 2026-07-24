@@ -68,7 +68,7 @@
   const STYLES = ["braise", "filaments", "lingot", "sillage", "cicatrice", "soie", "net", "camps"];
 
   /* ---------- état ---------- */
-  let gon = null, cv = null, cx = null, btn = null, wallsEl = null, panEl = null, tipEl = null;
+  let gon = null, cv = null, cx = null, btn = null, panEl = null, tipEl = null;
   const off = document.createElement("canvas"), octx = off.getContext("2d");
   const tmp = document.createElement("canvas"), tctx = tmp.getContext("2d");
   const prj = document.createElement("canvas"), prjx = prj.getContext("2d");
@@ -98,8 +98,6 @@
   function resetBook() {
     samples = []; binSize = 0; wallHist.clear(); walls = []; fled = [];
     imgDirty = true; P = null;
-    if (wallsEl) wallsEl.querySelector("#gonHeatWallsRows").innerHTML =
-      '<div class="ghRow"><span class="ghK">accumulation en cours…</span></div>';
   }
   async function poll() {
     if (!on || inFlight) return;
@@ -159,14 +157,37 @@
     walls = [...s.bins].filter(([k, v]) => v >= .45*max && (wallHist.get(k)||0) >= 4)
       .map(([k, v]) => ({ p: (k + .5)*binSize, usd: v, mins: (wallHist.get(k)||0)*EVERY/60000 }))
       .sort((a, b) => b.usd - a.usd).slice(0, 4);
-    if (!wallsEl || !showWalls) return;
-    const rows = walls.map(w =>
-      `<div class="ghRow"><span class="ghP">${w.p.toFixed(priceDec)}</span>` +
-      `<span class="ghK">${fmtUsd(w.usd)} · TENU ${w.mins < 1 ? "<1" : Math.round(w.mins)} min</span></div>`)
-      .concat(fled.map(f =>
-        `<div class="ghRow ghFled"><span class="ghP">${f.p.toFixed(priceDec)}</span><span class="ghK">FUITE ${f.at}</span></div>`));
-    wallsEl.querySelector("#gonHeatWallsRows").innerHTML =
-      rows.length ? rows.join("") : '<div class="ghRow"><span class="ghK">accumulation en cours…</span></div>';
+  }
+
+  /* ---------- ÉTIQUETTES DÉDIÉES par mur, SUR LA CHARTE (demande Meddy :
+     pas de tableau — chaque mur porte son label à son prix ; fuites barrées) ---------- */
+  function drawWallLabels(Y, plotW) {
+    if (!showWalls) return;
+    const items = walls.map(w => ({
+      y: Y(w.p), fled: false,
+      txt: `${w.p.toFixed(priceDec)} · ${fmtUsd(w.usd)} · TENU ${w.mins < 1 ? "<1" : Math.round(w.mins)} min`,
+    })).concat(fled.map(f => ({
+      y: Y(f.p), fled: true,
+      txt: `${f.p.toFixed(priceDec)} · FUITE ${f.at}`,
+    }))).filter(it => Number.isFinite(it.y)).sort((a, b) => a.y - b.y);
+    if (!items.length) return;
+    const lx = plotW - 92;                       /* à gauche de la colonne des chips POI */
+    let prevY = -1e9;
+    cx.textAlign = "right"; cx.font = "700 9px Consolas, monospace";
+    for (const it of items) {
+      const y = Math.max(it.y, prevY + 13); prevY = y;
+      if (y < 8 || y > cv.height - axH - 8) continue;
+      const tw = cx.measureText(it.txt).width;
+      cx.fillStyle = "rgba(6,6,4,.78)"; cx.fillRect(lx - tw - 6, y - 6.5, tw + 10, 13);
+      if (it.fled) {
+        cx.fillStyle = "#8a5560"; cx.fillText(it.txt, lx, y + 3.5);
+        cx.strokeStyle = "rgba(138,85,96,.8)"; cx.lineWidth = 1;
+        cx.beginPath(); cx.moveTo(lx - tw - 2, y); cx.lineTo(lx + 2, y); cx.stroke();
+      } else {
+        cx.fillStyle = GOLD_B; cx.fillText(it.txt, lx, y + 3.5);
+      }
+    }
+    cx.textAlign = "left";
   }
 
   /* ---------- construction PAR SONDE : image + projection + runs + hot + échelle ---------- */
@@ -298,17 +319,14 @@
                   hasImg: style !== "lingot" });
   }
 
-  /* ---------- échelle $ en offscreen (blit au repaint) ---------- */
-  const SCL_W = 116, SCL_H = 192;
+  /* ---------- échelle $ NUE (demande Meddy : plus de boîte) — offscreen, blit au repaint ---------- */
+  const SCL_W = 116, SCL_H = 178;
   function buildScale(med) {
-    const SC = RAMPS[ramp], sh = 130, sw = 9, sx = 8, sy = 22;
+    const SC = RAMPS[ramp], sh = 130, sw = 9, sx = 2, sy = 18;
     scl.width = SCL_W; scl.height = SCL_H;
     sclx.clearRect(0, 0, SCL_W, SCL_H);
-    sclx.fillStyle = "rgba(8,7,4,.82)"; sclx.fillRect(0, 0, SCL_W, SCL_H);
-    sclx.strokeStyle = "rgba(107,90,42,.5)"; sclx.lineWidth = 1;
-    sclx.strokeRect(.5, .5, SCL_W - 1, SCL_H - 1);
-    sclx.fillStyle = rgba(GOLD, .9); sclx.font = "8px Segoe UI";
-    sclx.fillText("LIQUIDITÉ POSÉE", sx, 13);
+    sclx.fillStyle = rgba(GOLD, .8); sclx.font = "8px Segoe UI";
+    sclx.fillText("LIQUIDITÉ POSÉE", sx, 9);
     for (let p2 = 0; p2 < sh; p2++) {
       const q = 1 - p2/(sh - 1), li = Math.round(q*255)*4;
       sclx.fillStyle = `rgba(${SC[li]},${SC[li+1]},${SC[li+2]},${Math.max(.10, SC[li+3]/255)})`;
@@ -317,11 +335,14 @@
     sclx.font = "9px Consolas, monospace";
     for (const q of [1, .82, .47, .16]) {
       const y = sy + (1 - q)*(sh - 1);
+      const txt = fmtUsd(med*Math.pow(48, Math.min(1.1, q/intensity)));
+      const tw = sclx.measureText(txt).width;
+      sclx.fillStyle = "rgba(6,6,4,.7)"; sclx.fillRect(sx + sw + 5, y - 5, tw + 4, 11);
       sclx.fillStyle = rgba(GOLD_B, .85); sclx.fillRect(sx + sw + 1, y, 3, 1);
-      sclx.fillText(fmtUsd(med*Math.pow(48, Math.min(1.1, q/intensity))), sx + sw + 7, y + 3);
+      sclx.fillText(txt, sx + sw + 7, y + 3);
     }
     sclx.fillStyle = "#7d795f"; sclx.font = "8px Segoe UI";
-    sclx.fillText(`sous ${fmtUsd(med)} : éteint`, sx, sy + sh + 14);
+    sclx.fillText(`sous ${fmtUsd(med)} : éteint`, sx, sy + sh + 12);
   }
 
   /* ---------- repaint : mappage viewport + blits sur caches ---------- */
@@ -353,8 +374,7 @@
     const w = Math.round(host.width), h = Math.round(host.height);
     if (w > 0 && h > 0 && (cv.width !== w || cv.height !== h)) { cv.width = w; cv.height = h; }
     cx.clearRect(0, 0, cv.width, cv.height);
-    if (gon.replay) { if (wallsEl) wallsEl.style.display = "none"; return; }
-    if (wallsEl) wallsEl.style.display = showWalls ? "block" : "none";
+    if (gon.replay) return;
     if (gon.symbol !== curSymbol) { curSymbol = gon.symbol; resetBook(); return; }
     /* switch TF/symbole en cours : ne jamais peindre l'ancien carnet sur la
        nouvelle grille (même garde que poi-render, via dataCtx) */
@@ -374,15 +394,19 @@
     cx.save();
     cx.beginPath(); cx.rect(0, 0, plotW, plotH); cx.clip();
 
+    /* nappe AU-DESSUS du chart en transparence douce (retour Meddy : le montage
+       sous les bougies ne se voyait pas) — plafond d'alpha .8, bougies lisibles */
     if (P.hasImg) {
       if (style === "net" || style === "sillage") {
         cx.imageSmoothingEnabled = false;
-        if (style === "sillage") cx.globalAlpha = .30;
+        cx.globalAlpha = style === "sillage" ? .30 : .8;
         cx.drawImage(off, 0, 0, n, rows, xA, yT, xB - xA, yB2 - yT);
         cx.globalAlpha = 1;
       } else if (style === "braise") {
         cx.imageSmoothingEnabled = true; cx.imageSmoothingQuality = "high";
+        cx.globalAlpha = .8;
         cx.drawImage(off, 0, 0, n, rows, xA, yT, xB - xA, yB2 - yT);
+        cx.globalAlpha = 1;
       } else {
         /* colonnes franches en X, fondu en Y — l'intermédiaire n'est reconstruit
            que si l'image a changé (sonde) ou si le zoom a changé sa largeur */
@@ -393,14 +417,14 @@
           tctx.drawImage(off, 0, 0, n, rows, 0, 0, wantW, rows);
         }
         cx.imageSmoothingEnabled = true; cx.imageSmoothingQuality = "high";
-        if (style === "filaments") cx.globalAlpha = .45;
-        if (style === "cicatrice") cx.globalAlpha = .40;
+        cx.globalAlpha = style === "filaments" ? .45 : style === "cicatrice" ? .40 : .8;
         cx.drawImage(tmp, 0, 0, tmp.width, rows, xA, yT, xB - xA, yB2 - yT);
         cx.globalAlpha = 1;
       }
     }
     drawOverlays(X, Y, colW, plotW, plotH);
     drawAhead(X, Y, colW, plotW, plotH);
+    drawWallLabels(p => Y(p), plotW);
     cx.restore();
     if (style === "braise" && showScale && plotH > SCL_H + 200)
       cx.drawImage(scl, 8, plotH - SCL_H - 150);
@@ -426,6 +450,8 @@
     cx.imageSmoothingEnabled = true; cx.imageSmoothingQuality = "high";
     const yT = Y((kHi + 1)*binSize), yB2 = Y(kLo*binSize);
     cx.drawImage(prj, 0, 0, 1, rows, x1 + 2, yT, plotW - x1 - 2, yB2 - yT);
+    cx.fillStyle = "#7d795f"; cx.font = "8px Segoe UI";
+    cx.fillText("EN AVANCE · carnet posé", x1 + 6, 12);
   }
 
   /* ---------- couches styles depuis les CACHES (aucun scan par frame) ---------- */
@@ -571,20 +597,6 @@
     tipEl.style.top = Math.min(window.innerHeight - th2 - 6, e.clientY + 12) + "px";
   }
 
-  /* ---------- fond transparent réversible ---------- */
-  function applyUnderlay(en) {
-    try {
-      if (en) {
-        savedBg = (gon.theme && gon.theme.bg) || "#060604";
-        gon.mount.style.background = savedBg;
-        gon.chart.applyOptions({ layout: { background: { color: "rgba(0,0,0,0)" } } });
-      } else {
-        gon.chart.applyOptions({ layout: { background: { color: savedBg || (gon.theme && gon.theme.bg) || "#060604" } } });
-        gon.mount.style.background = "";
-      }
-    } catch (_) {}
-  }
-
   /* ---------- cycle de vie ---------- */
   function restartPoll() {
     if (pollTimer) clearInterval(pollTimer);
@@ -593,9 +605,7 @@
   function applyOn() {
     btn.classList.toggle("on", on);
     cv.style.display = on ? "block" : "none";
-    wallsEl.style.display = on && showWalls ? "block" : "none";
     hideTip();
-    applyUnderlay(on);
     if (on) {
       resetBook(); curSymbol = gon.symbol;
       paintMsAvg = 0; calmPaints = 0;
@@ -627,7 +637,7 @@
       `<div class="ghL">INTENSITÉ <span id="ghIntV">${Math.round(intensity*100)}%</span></div>` +
       `<input id="ghInt" type="range" min="40" max="220" value="${Math.round(intensity*100)}">` +
       `<label class="ghC"><input id="ghScale" type="checkbox"${showScale ? " checked" : ""}> Échelle $ (dégradé = valeurs)</label>` +
-      `<label class="ghC"><input id="ghWalls" type="checkbox"${showWalls ? " checked" : ""}> Murs suivis (sous l'échelle)</label>`;
+      `<label class="ghC"><input id="ghWalls" type="checkbox"${showWalls ? " checked" : ""}> Étiquettes murs (sur la charte)</label>`;
     document.body.appendChild(panEl);
     panEl.addEventListener("click", e => {
       const b = e.target.closest("button");
@@ -647,7 +657,7 @@
     panEl.querySelector("#ghScale").onchange = e => { showScale = e.target.checked; save(K_SCALE, showScale ? "1" : "0");
       imgDirty = true; queueRepaint(); };
     panEl.querySelector("#ghWalls").onchange = e => { showWalls = e.target.checked; save(K_WALLS, showWalls ? "1" : "0");
-      wallsEl.style.display = on && showWalls && !gon.replay ? "block" : "none"; };
+      queueRepaint(); };
     document.addEventListener("pointerdown", e => {
       if (panEl.style.display === "block" && !panEl.contains(e.target) && e.target !== btn) panEl.style.display = "none";
     }, true);
@@ -665,7 +675,7 @@
     syncTheme(gon.theme);
     window.addEventListener("gon:theme", e => {
       syncTheme(e.detail);
-      if (on) { applyUnderlay(true); imgDirty = true; queueRepaint(); }
+      if (on) { imgDirty = true; queueRepaint(); }
     });
 
     style = pref(K_STYLE, "braise"); if (!STYLES.includes(style)) style = "braise";
@@ -678,17 +688,6 @@
     const css = document.createElement("style");
     css.textContent = `
       #gonHeatCv { position:absolute; inset:0; pointer-events:none; }
-      /* MURS SUIVIS : au-dessus du logo/watermark (revue : collision bottom:36) */
-      #gonHeatWalls { position:absolute; left:8px; bottom:128px; z-index:7; pointer-events:none;
-        background:rgba(10,9,6,.9); border:1px solid #26200e; border-radius:6px;
-        padding:7px 10px; min-width:200px; font:11px "Segoe UI", sans-serif; display:none; }
-      #gonHeatWalls .ghHd { font-size:8px; letter-spacing:2.5px; color:#d9b64d; margin-bottom:4px; }
-      #gonHeatWalls .ghRow { display:flex; justify-content:space-between; gap:12px; font-size:10px;
-        padding:1px 0; font-variant-numeric:tabular-nums; }
-      #gonHeatWalls .ghP { font-family:Consolas, monospace; color:#f0d478; }
-      #gonHeatWalls .ghK { color:#7d795f; font-size:8.5px; letter-spacing:.5px; }
-      #gonHeatWalls .ghFled .ghP { color:#6e6a58; text-decoration:line-through; }
-      #gonHeatWalls .ghFled .ghK { color:#8a5560; }
       #gonHeatTip { position:fixed; display:none; z-index:60; pointer-events:none;
         background:rgba(10,9,6,.96); border:1px solid #6b5a2a; border-radius:5px;
         padding:4px 8px; font:10.5px "Segoe UI", sans-serif; color:#e8dcb0;
@@ -715,12 +714,12 @@
 
     cv = document.createElement("canvas"); cv.id = "gonHeatCv";
     cx = cv.getContext("2d");
-    /* PREMIER enfant de chartwrap : peint SOUS le chart (fond LWC transparent) */
-    gon.mount.insertBefore(cv, gon.mount.firstChild);
-
-    wallsEl = document.createElement("div"); wallsEl.id = "gonHeatWalls";
-    wallsEl.innerHTML = `<div class="ghHd">MURS SUIVIS · RÉEL</div><div id="gonHeatWallsRows"></div>`;
-    gon.mount.appendChild(wallsEl);
+    /* juste APRÈS le conteneur LWC : au-dessus des bougies (alpha plafonné .8),
+       SOUS les overlays POI/sonar qui arrivent plus tard dans le DOM */
+    const lwc = gon.mount.querySelector(".tv-lightweight-charts");
+    if (lwc && lwc.nextSibling) gon.mount.insertBefore(cv, lwc.nextSibling);
+    else if (lwc) gon.mount.appendChild(cv);
+    else gon.mount.insertBefore(cv, gon.mount.firstChild ? gon.mount.firstChild.nextSibling : null);
 
     tipEl = document.createElement("div"); tipEl.id = "gonHeatTip";
     document.body.appendChild(tipEl);
