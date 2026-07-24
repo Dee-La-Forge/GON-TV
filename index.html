@@ -978,6 +978,7 @@ async function fillGapSec() {
   const seq = loadSeq;
   try {
     for (let round = 0; round < 20; round++) {
+      if (round > 0) await new Promise(r => setTimeout(r, 100));   // pacing (audit 8) : 20 pages dos à dos = poids 400 instantané
       const tr = await fetchJson(`${AGGT}?symbol=${symbol}&fromId=${lastAggId + 1}&limit=1000`, 10000);
       if (seq !== loadSeq || replay || !Array.isArray(tr) || !tr.length) break;
       applyTrades(tr);
@@ -995,8 +996,12 @@ function fillGapSecSoon() {   // throttle PROPRE aux secondes (ne pas partager a
    petits lots séquentiels (léger pour l'API), prepend vers la gauche en gardant
    la fenêtre temporelle visible → aucun saut, la 1re page reste instantanée */
 async function deepenSec(seq) {   // garde seq : une boucle périmée (TF/symbole changé) se rompt sans muter
-  const target = 500 * tfDef().sec;   // ~500 seaux visés
-  for (let g = 0; g < 8; g++) {
+  // ~500 seaux + 1 h de marge (alignement 2026-07-24) : la frontière gauche de
+  // l'historique est la zone où les ancres POI ne peuvent pas se raffiner
+  // (fenêtres M15 tronquées) — on l'éloigne de l'écran au lieu de la laisser
+  // chroniquement visible (la cible 500 seaux ≈ la largeur d'écran en 3 s).
+  const target = 500 * tfDef().sec + 4 * 900;
+  for (let g = 0; g < 12; g++) {
     // Espacement anti-rafale (revue débit) : 8 tours × 2 pages à POIDS 20 dos à
     // dos = 320 de poids instantanés → 429 quasi garanti sur IP partagée. La
     // profondeur est une tâche de FOND : 250 ms entre tours étalent la même
@@ -1023,17 +1028,22 @@ async function deepenSec(seq) {   // garde seq : une boucle périmée (TF/symbol
       if (!older.length) continue;
       const vr = ts().getVisibleRange();          // fenêtre temporelle stable à travers le prepend
       candles = older.concat(candles);
-      setAll(candles);
+      // setAllDeferInd (fluidité 2026-07-24) : setAll recalculait l'ATR complet
+      // + setData intégral à CHAQUE tour (jusqu'à 12 fois juste après le load,
+      // pile pendant que l'utilisateur commence à lire) — l'ATR attend la fin.
+      setAllDeferInd(candles);
       if (vr) try { ts().setVisibleRange(vr); } catch {}
     } catch { break; } finally { loadingOld = false; }
   }
 }
-/* scroll-back des TF secondes : 5 pages de trades en arrière par déclenchement.
+/* scroll-back des TF secondes : 10 pages de trades en arrière par déclenchement
+   (fluidité 2026-07-24 : 5 pages = 15-50 s de BTC par aller-retour — 2× moins
+   d'allers-retours ET 2× moins de setData par bougie obtenue à poids constant).
    'end' = genèse atteinte ; null = réessayer plus tard (erreur/contexte) */
 async function fetchOlderSec() {
   const seq = loadSeq, firstId = firstTradeId;
   if (firstId == null || firstId <= 1) return OLDEST;
-  const { trades, healthy } = await fetchTradesBack(firstId, 5);
+  const { trades, healthy } = await fetchTradesBack(firstId, 10);
   if (seq !== loadSeq || !ctxFresh()) return null;
   if (!trades.length) return healthy ? OLDEST : null;   // vide + pages saines = genèse réelle
   firstTradeId = trades[0].a;
@@ -2770,10 +2780,25 @@ function updateApiBan() {   // bandeau persistant pendant un ban 429/418 (le toa
 
 /* --- bougies du passé : chargement auto en scrollant vers la gauche --- */
 let oldErrUntil = 0;   // pause après une erreur API (ban 429/418) : pas de tempête de requêtes au bord gauche
-ts().subscribeVisibleLogicalRangeChange(async r => {
+let oldRetryTimer = null;
+/* Fluidité 2026-07-24 : le chargement était purement RÉACTIF (seuil 30 bougies
+   = au contact du vide) et un déclenchement rejeté pendant que loadingOld était
+   tenu (deepenSec ~4-8 s après chaque load) était PERDU — l'utilisateur
+   immobile au bord gauche ne recevait rien tant qu'il ne « remuait » pas.
+   Désormais : PREFETCH (on tire dès ~300 bougies du bord en secondes, 120 en
+   klines — le chargement se fait PENDANT la lecture), re-armement quand le
+   verrou est tenu, et ENCHAÎNEMENT automatique pacé tant que la vue reste
+   sous le seuil (le chargement suit la lecture sans nouvel événement). */
+async function loadOlder() {
   // contexte périmé (backoff après changement TF/symbole) : tout fetch mélangerait deux actifs
-  if (!r || r.from > 30 || replay || ctxBusy() || loadingOld || oldestDone || Date.now() < oldErrUntil
+  if (replay || ctxBusy() || oldestDone || Date.now() < oldErrUntil
       || !candles.length || candles.length >= MAX_BARS) return;   // plein : pas de fetch pour rien
+  let r = null; try { r = ts().getVisibleLogicalRange(); } catch {}
+  if (!r || r.from > (isSecTf() ? 300 : 120)) return;
+  if (loadingOld) {   // verrou tenu (deepenSec / lot en vol) : re-armé au lieu de perdre le geste
+    clearTimeout(oldRetryTimer); oldRetryTimer = setTimeout(loadOlder, 300);
+    return;
+  }
   loadingOld = true;
   try {
     let older;
@@ -2809,7 +2834,12 @@ ts().subscribeVisibleLogicalRangeChange(async r => {
     // page « pleine » d'un TF agrégé = KL_PAGE/fact seaux (moins le partiel écarté)
     if (!isSecTf() && older.length < Math.floor(KL_PAGE / (tfDef().fact || 1)) - 1) oldestDone = true;
   } catch {} finally { loadingOld = false; }
-});
+  // enchaînement (lot réussi, chemin nominal) : si la vue est toujours sous le
+  // seuil, lot suivant après 200 ms — s'arrête tout seul quand le tampon
+  // gauche est constitué (r.from repasse au-dessus du seuil) ou à oldestDone.
+  if (isSecTf()) { clearTimeout(oldRetryTimer); oldRetryTimer = setTimeout(loadOlder, 200); }
+}
+ts().subscribeVisibleLogicalRangeChange(() => loadOlder());
 
 try {
   const st = JSON.parse(localStorage.getItem('orion-theme'));
@@ -2842,6 +2872,10 @@ window.__gon = {
   get tfSec() { return tfDef().sec; },
   get theme() { return theme; },
   get replay() { return !!replay; },   // les modules masquent les infos "futures" (verdicts ✦) en replay
+  // Contexte des bougies AFFICHÉES (alignement 2026-07-24) : pendant un switch
+  // TF/symbole, ≠ symbol|tf courant — le rendu POI s'efface au lieu de peindre
+  // l'ancienne série sur la nouvelle grille.
+  get dataCtx() { return dataCtx; },
   priceToY: p => series.priceToCoordinate(p),
   timeToX: xOf,
   // Revue : bougies PAR RÉFÉRENCE (live = candles, replay = tranche mémoïsée) —
@@ -2892,7 +2926,13 @@ setInterval(() => {
   try {
     const n = dataNow().length; if (!n) return;
     const lr = ts().getVisibleLogicalRange();
-    if (lr && lr.to < n - 1) snapToLive();   // derniere bougie hors vue -> retour au direct
+    if (!lr || lr.to >= n - 1) return;
+    // Lecture PROFONDE dans le passé (fluidité 2026-07-24) : à plus de 3
+    // écrans du direct, l'utilisateur ÉTUDIE — le retour auto détruisait sa
+    // position de lecture (30 s immobile = position perdue). Le retour auto
+    // ne s'applique qu'au voisinage du direct (dérive involontaire).
+    if (n - 1 - lr.to > (lr.to - lr.from) * 3) return;
+    snapToLive();   // derniere bougie hors vue -> retour au direct
   } catch {}
 }, 2000);
 
@@ -2990,7 +3030,7 @@ if ('serviceWorker' in navigator && location.hostname.endsWith('github.io')) nav
 <script src="poi/poi-detector.js?v=3"></script>
 <script src="poi/poi-lifecycle.js?v=8"></script>
 <script src="poi/stream.js?v=1"></script>
-<script src="poi/poi-render.js?v=73"></script>
+<script src="poi/poi-render.js?v=74"></script>
 <script src="poi/poi-feature.js?v=47"></script>
 <script src="poi/liq-flux.js?v=42"></script>
 <script src="poi/whale-sonar.js?v=32"></script>

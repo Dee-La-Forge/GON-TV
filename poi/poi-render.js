@@ -302,11 +302,37 @@
     // premiere-qui-touche est donc fausse pour une NAISSANCE.
     // birth=false (touche/mort) : premiere bougie dont la plage recouvre la zone.
     let anchorCache = new Map(), anchorKey = "", paintData;
+    const loadPaintData = () => {
+      if (paintData === undefined) {
+        try { paintData = (typeof gon.dataNow === "function" ? gon.dataNow() : gon.series.data()) || null; }
+        catch (_) { paintData = null; }
+      }
+      return paintData;
+    };
+    // (alignement 2026-07-24) : un temps snappe peut tomber sur un seau VIDE —
+    // frequent en secondes (un seau sans trade n'a PAS de bougie), possible en
+    // klines (trou d'exchange). xOf interpolerait alors ENTRE deux bougies et
+    // le trait flottait "dans le vide". On ancre au centre de la bougie REELLE
+    // contenante (dernier time <= t) quand t est dans la plage des donnees.
+    function toExistingBar(t) {
+      const A = loadPaintData();
+      if (!A || !A.length || t < A[0].time || t > A[A.length - 1].time) return t;
+      let lo = 0, hi = A.length - 1;
+      while (hi - lo > 1) { const m = (lo + hi) >> 1; if (A[m].time <= t) lo = m; else hi = m; }
+      return A[hi].time <= t ? A[hi].time : A[lo].time;
+    }
     function anchorSec(poi, ms, birth) {
       const snapped = snapToBarSec(ms);
       const s = Number(gon.tfSec) || 0;
-      if (s <= 0 || s >= 900) return snapped;   // TF >= M15 : bougie contenante deja exacte
-      const ck = (gon.symbol || "") + "|" + (gon.tf || "");
+      if (s <= 0) return snapped;
+      if (s >= 900) return toExistingBar(snapped);   // TF >= M15 : bougie contenante exacte — sur bougie REELLE (kline absente couverte)
+      // Cle de cache = symbole|tf|TETE des donnees (alignement 2026-07-24) : la
+      // tete d'une page est un seau PARTIEL (coupe par la pagination), complete
+      // ensuite par deepenSec — une ancre calculee dessus restait figee fausse,
+      // aucun prepend n'invalidait le cache. Inclure A[0].time vide le cache a
+      // chaque prepend (rares apres stabilisation, cout negligeable).
+      const D = loadPaintData();
+      const ck = (gon.symbol || "") + "|" + (gon.tf || "") + "|" + (D && D.length ? D[0].time : 0);
       if (ck !== anchorKey) { anchorCache.clear(); anchorKey = ck; }
       const key = (poi.id || "") + "|" + ms + (birth ? "|b" : "");
       let v = anchorCache.get(key);
@@ -318,15 +344,14 @@
       // (scroll-back a venir) restait figee fausse jusqu'au changement de TF.
       let cacheable = false;
       try {
-        // Revue : dataNow (référence, zéro copie) si l'hôte l'expose ; repli
-        // series.data() (copie complète) pour un G-Bot antérieur.
-        if (paintData === undefined) paintData = (typeof gon.dataNow === "function" ? gon.dataNow() : gon.series.data()) || null;
-        const A = paintData;
+        const A = loadPaintData();
         if (A && A.length) {
           const w0 = Math.floor(ms / (W15 * 1000)) * W15;   // debut de la fenetre M15 (s)
           const tSec = ms / 1000;
           if (birth) {
-            cacheable = A[0].time <= w0 && A[A.length - 1].time >= w0 + 900;
+            // Cacheable durci (alignement) : la tete des donnees ne doit JAMAIS
+            // etre DANS la plage cherchee (w0 - s couvre la chevauchante).
+            cacheable = A[0].time <= w0 - s && A[A.length - 1].time >= w0 + 900;
             // FIDELITE (equipe debug) : fpTimeStart/fpTimeEnd = datation REELLE
             // de la formation du cluster (ms, 9821/9821 valides dans l'archive,
             // pose aussi par le detecteur live). L'extreme se cherche dans CETTE
@@ -339,14 +364,25 @@
               if (to <= from) { from = w0; to = w0 + 900; }
             }
             const f0 = from - s;   // chevauchante incluse aussi pour l'extreme de naissance
-            let lo = 0, hi = A.length - 1;
-            while (hi - lo > 1) { const m = (lo + hi) >> 1; if (A[m].time < f0) lo = m; else hi = m; }
-            let bestV = null;
-            for (let i = lo; i < A.length && A[i].time < to; i++) {
-              const b = A[i];
-              if (b.time + s <= from) continue;
-              if (poi.direction === "short") { if (bestV == null || b.high > bestV) { bestV = b.high; v = b.time; } }
-              else { if (bestV == null || b.low < bestV) { bestV = b.low; v = b.time; } }
+            // GATE de couverture GAUCHE (alignement 2026-07-24, cause majeure en
+            // secondes) : si la tete des donnees tombe DANS la plage cherchee
+            // (fenetre M15 a cheval sur le debut de l'historique — chronique en
+            // 3 s ou l'historique ne couvre que ~25 min), la vraie bougie
+            // formatrice est peut-etre ABSENTE : raffiner poserait la pastille
+            // sur une mauvaise bougie, tiree vers la tete des donnees. Repli
+            // snapped (temporellement exact). Le cote DROIT reste ouvert : la
+            // fenetre M15 COURANTE se raffine legitimement sur l'extreme
+            // "jusqu'ici" (provisoire, naissances live).
+            if (A[0].time <= f0) {
+              let lo = 0, hi = A.length - 1;
+              while (hi - lo > 1) { const m = (lo + hi) >> 1; if (A[m].time < f0) lo = m; else hi = m; }
+              let bestV = null;
+              for (let i = lo; i < A.length && A[i].time < to; i++) {
+                const b = A[i];
+                if (b.time + s <= from) continue;
+                if (poi.direction === "short") { if (bestV == null || b.high > bestV) { bestV = b.high; v = b.time; } }
+                else { if (bestV == null || b.low < bestV) { bestV = b.low; v = b.time; } }
+              }
             }
           } else {
             // TOUCHE/MORT — recherche ETAGEE (equipe debug, mesures : 17 % des
@@ -361,6 +397,11 @@
             const zHi = Math.max(zsHi, poi.clusterHigh ?? zsHi);                           //  ∪ cluster
             const seek = (from, to, mode, first) => {   // bougie qui touche, 1re (first) ou la PLUS PROCHE de tSec
               const f0 = from - s;   // attrape la chevauchante
+              // GATE de couverture GAUCHE (alignement 2026-07-24) : plage
+              // tronquee par la tete des donnees -> la vraie bougie touchante
+              // est peut-etre absente, "premiere qui touche" serait EN RETARD
+              // et "plus proche de tSec" fausse des deux cotes. On refuse.
+              if (A[0].time > f0) return null;
               let lo = 0, hi = A.length - 1;
               while (hi - lo > 1) { const m = (lo + hi) >> 1; if (A[m].time < f0) lo = m; else hi = m; }
               let best = null, bd = Infinity;
@@ -396,9 +437,12 @@
             // et toute mort recente JAMAIS cacheables -> recalcul par frame) ;
             // l'exigence large ne s'applique qu'aux resultats des etages 2-4.
             cacheable = viaExact
-              ? (A[0].time <= w0 && A[A.length - 1].time >= w0 + W15)
-              : (A[0].time <= w0 - 3 * W15 && A[A.length - 1].time >= w0 + 4 * W15);
+              ? (A[0].time <= w0 - s && A[A.length - 1].time >= w0 + W15)
+              : (A[0].time <= w0 - 3 * W15 - s && A[A.length - 1].time >= w0 + 4 * W15);
           }
+          // Repli snapped (fenetre non couverte, ou aucune bougie touchante) :
+          // ancre sur la bougie REELLE contenante, jamais entre deux bougies.
+          if (v === snapped) v = toExistingBar(snapped);
         }
       } catch (_) {}
       if (cacheable) {
@@ -698,6 +742,16 @@
       // Etat stable "rien a montrer" (masque / aucun POI) : on efface, c'est
       // definitif tant que la vue ne change pas.
       if (!visible || (!pois.length && !prov)) { ctx.clearRect(0, 0, cv.width, cv.height); lastGoodTf = gon.tf; lastGoodSym = gon.symbol; return true; }
+      // (alignement 2026-07-24, cause 4) : pendant un switch TF/symbole, la
+      // serie AFFICHEE est encore l'ancienne alors que la grille (tfSec,
+      // bucketStart) est deja la nouvelle -> snap sur des temps qui ne sont
+      // pas des ouvertures de l'ancienne grille, niveaux visiblement decales
+      // qui "sautent" a l'arrivee des donnees. On efface et on retente au
+      // tick suivant (meme mecanique que lastGoodTf).
+      if (typeof gon.dataCtx === "string" && gon.dataCtx !== (gon.symbol + "|" + gon.tf)) {
+        ctx.clearRect(0, 0, cv.width, cv.height);
+        return false;
+      }
       let axisH = 0;
       try { axisH = (typeof gon.ts().height === "function" ? gon.ts().height() : 0) || 0; } catch (_) {}
       const paneH = Math.max(1, cv.height / dpr - axisH);
