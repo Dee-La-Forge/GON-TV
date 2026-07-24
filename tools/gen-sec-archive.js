@@ -135,12 +135,24 @@ function writeAtomic(file, text) {
       }
     }
     // rétention : les jours hors fenêtre quittent le working tree
+    for (const f of fs.readdirSync(dir)) {
+      const m = /^3s-(\d{4}-\d{2}-\d{2})\.json$/.exec(f);
+      if (m && !keep.has(m[1])) {
+        try { fs.rmSync(path.join(dir, f)); console.log(`${symbol}: purge ${m[1]}`); } catch (_) {}
+      }
+    }
+  }
+
+  // Index reconstruit en scannant TOUS les répertoires présents — jamais les
+  // seuls symboles traités : un run mono-symbole (rattrapage) écraserait
+  // sinon l'index global avec ce seul symbole.
+  for (const symbol of ALL_SYMBOLS) {
+    const dir = path.join(OUT_ROOT, symbol);
+    if (!fs.existsSync(dir)) continue;
     const have = [];
     for (const f of fs.readdirSync(dir)) {
       const m = /^3s-(\d{4}-\d{2}-\d{2})\.json$/.exec(f);
-      if (!m) continue;
-      if (keep.has(m[1])) have.push(m[1]);
-      else { try { fs.rmSync(path.join(dir, f)); console.log(`${symbol}: purge ${m[1]}`); } catch (_) {} }
+      if (m) have.push(m[1]);
     }
     have.sort();
     if (have.length) index.days[symbol] = have;
