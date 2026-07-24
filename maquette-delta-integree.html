@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>G-ON — DELTA &amp; ABSORPTION · maquette intégrée</title>
+<style>
+  :root { --bg:#060604; --gold:#d9b64d; --gold-b:#f0d478; --gold-d:#6b5a2a; --border:#26200e;
+          --bull:#3ecfd4; --bear:#ff2d5e; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--bg); color:#cbb26a; font:12px/1.4 "Segoe UI", system-ui, sans-serif; overflow:hidden; }
+  /* ---------- topbar, réplique de l'app ---------- */
+  #topbar { position:fixed; inset:0 0 auto 0; height:40px; display:flex; align-items:center; gap:10px;
+            padding:0 12px; background:#0a0906; border-bottom:1px solid var(--border); z-index:5; }
+  #logo { width:26px; height:26px; border-radius:50%; background:radial-gradient(circle at 35% 35%, #2a2410, #0a0906);
+          border:1px solid var(--gold-d); display:flex; align-items:center; justify-content:center;
+          color:var(--gold-b); font-size:9px; font-weight:700; letter-spacing:.5px; }
+  #symBtn { background:#0f0d08; border:1px solid var(--border); color:var(--gold-b); padding:5px 10px;
+            border-radius:4px; font-size:12px; letter-spacing:1px; font-weight:600; }
+  .tfbtn { background:none; border:1px solid transparent; color:#8d8154; padding:4px 7px; font-size:11px;
+           border-radius:3px; }
+  .tfbtn.on { color:#060604; background:linear-gradient(180deg,var(--gold-b),var(--gold)); font-weight:700;
+              box-shadow:0 0 10px rgba(217,182,77,.35); }
+  #replayBtn { margin-left:auto; background:#0f0d08; border:1px solid var(--border); color:var(--gold);
+               padding:5px 12px; border-radius:4px; font-size:11px; letter-spacing:2px; }
+  /* ---------- rail d'outils, réplique ---------- */
+  #rail { position:fixed; left:0; top:40px; bottom:0; width:40px; background:#0a0906;
+          border-right:1px solid var(--border); display:flex; flex-direction:column; align-items:center;
+          padding-top:10px; gap:9px; z-index:5; }
+  #rail i { width:26px; height:26px; border:1px solid transparent; border-radius:4px; display:flex;
+            align-items:center; justify-content:center; font-style:normal; font-size:13px; color:#8d8154; }
+  #rail i.on { color:#060604; background:linear-gradient(180deg,var(--gold-b),var(--gold)); }
+  /* ---------- colonnes droites, répliques ---------- */
+  #profCol { position:fixed; right:242px; top:40px; bottom:0; width:150px; background:#080704;
+             border-left:1px solid var(--border); z-index:4; }
+  #profCol .hd, #liqCol .hd { font-size:9px; letter-spacing:3px; color:var(--gold); padding:10px 12px 6px; }
+  #liqCol { position:fixed; right:0; top:40px; bottom:0; width:242px; background:#080704;
+            border-left:1px solid var(--border); z-index:4; padding-bottom:8px; display:flex; flex-direction:column; }
+  #liqCol .sym { font-size:9px; letter-spacing:2px; color:#6e6a58; padding:0 12px 8px; }
+  .cnt { padding:2px 12px 8px; }
+  .cnt .num { font-size:26px; font-weight:200; font-variant-numeric:tabular-nums; }
+  .cnt .unit { font-size:12px; margin-left:2px; }
+  .cnt .cap { font-size:8.5px; letter-spacing:2px; margin-top:1px; }
+  .cnt.bear { color:var(--bear); } .cnt.bear .cap { color:rgba(255,45,94,.55); }
+  .cnt.bull { color:var(--bull); } .cnt.bull .cap { color:rgba(62,207,212,.55); }
+  #domWrap { padding:2px 12px 10px; }
+  #domBar { height:5px; background:#14110a; border-radius:3px; position:relative; overflow:hidden; }
+  #domBar .l { position:absolute; right:50%; top:0; bottom:0; width:12%; background:var(--bear); }
+  #domBar .s { position:absolute; left:50%; top:0; bottom:0; width:34%; background:var(--bull); }
+  #domBar .n { position:absolute; left:50%; top:-2px; bottom:-2px; width:1px; background:#3a3320; }
+  #domCap { display:flex; justify-content:space-between; font-size:8.5px; letter-spacing:2px; color:#6e6a58; margin-top:4px; }
+  /* ---------- PROPOSITION C : bloc OI/funding inséré dans le panneau ---------- */
+  #oiBlock { margin:2px 10px 8px; border:1px solid rgba(217,182,77,.35); border-radius:6px;
+             padding:7px 9px; position:relative; background:rgba(217,182,77,.03); }
+  #oiBlock .row { display:flex; justify-content:space-between; font-size:11px; padding:2px 0;
+                  font-variant-numeric:tabular-nums; }
+  #oiBlock .k { color:#6e6a58; font-size:8.5px; letter-spacing:1.6px; align-self:center; }
+  #oiBlock .dn { color:var(--bear); } #oiBlock .fund { color:var(--gold-b); }
+  #oiBlock .regime { margin-top:5px; text-align:center; font-size:9.5px; letter-spacing:2px; color:#060604;
+                     background:linear-gradient(180deg,#ff8c5e,#e0564d); border-radius:4px; padding:2.5px 0;
+                     font-weight:700; }
+  #chan { flex:1; min-height:90px; margin:0 10px; border-top:1px solid #14110a; position:relative; }
+  #chan canvas { position:absolute; inset:0; width:100%; height:100%; }
+  #journal { padding:6px 12px 0; }
+  #journal .t { font-size:8.5px; letter-spacing:2.5px; color:#6e6a58; margin-bottom:4px; }
+  #journal .ev { display:flex; gap:6px; align-items:center; font-size:10.5px; padding:2px 0;
+                 font-variant-numeric:tabular-nums; }
+  #journal .ev i { width:5px; height:5px; border-radius:50%; }
+  #journal .ev .tm { margin-left:auto; color:#6e6a58; font-size:9px; }
+  /* badges NOUVEAU */
+  .tag { position:absolute; z-index:8; font-size:8.5px; font-weight:700; letter-spacing:1px;
+         color:#060604; background:linear-gradient(180deg,var(--gold-b),var(--gold));
+         border-radius:3px; padding:1.5px 6px; box-shadow:0 0 12px rgba(217,182,77,.5); }
+  /* légende bas */
+  #legend { position:fixed; bottom:8px; left:50%; transform:translateX(-50%); z-index:8;
+            background:rgba(10,9,6,.95); border:1px solid var(--gold-d); border-radius:6px;
+            padding:6px 14px; font-size:10px; color:#b3a67f; display:flex; gap:18px; }
+  #legend b { color:var(--gold-b); }
+  canvas#cv { position:fixed; left:40px; top:40px; right:392px; bottom:0;
+              width:calc(100vw - 432px); height:calc(100vh - 40px); }
+</style>
+</head>
+<body>
+  <div id="topbar">
+    <div id="logo">G·ON</div>
+    <button id="symBtn">BTCUSDT ▾</button>
+    <span>
+      <button class="tfbtn">3s</button><button class="tfbtn on">15s</button><button class="tfbtn">30s</button>
+      <button class="tfbtn">45s</button><button class="tfbtn">1m</button><button class="tfbtn">15m</button>
+      <button class="tfbtn">1h</button><button class="tfbtn">1D</button>
+    </span>
+    <button id="replayBtn">⟲ REPLAY</button>
+  </div>
+  <div id="rail">
+    <i class="on">✛</i><i>╱</i><i>➶</i><i>▭</i><i>◯</i><i>T</i><i>👁</i>
+  </div>
+
+  <canvas id="cv"></canvas>
+
+  <div id="profCol">
+    <div class="hd">CARNET &nbsp;&amp;&nbsp; PROFIL</div>
+    <canvas id="prof" style="position:absolute; inset:34px 0 0 0; width:100%; height:calc(100% - 34px)"></canvas>
+  </div>
+
+  <div id="liqCol">
+    <div class="hd">LIQUIDATIONS · 15'</div>
+    <div class="sym">BTCUSDT</div>
+    <div class="cnt bear"><span class="num">0.4</span><span class="unit">M</span>
+      <div class="cap">▼ LONGS BRÛLÉS</div></div>
+    <div class="cnt bull"><span class="num">1.2</span><span class="unit">M</span>
+      <div class="cap">▲ SHORTS BRÛLÉS</div></div>
+    <div id="domWrap">
+      <div id="domBar"><div class="l"></div><div class="s"></div><div class="n"></div></div>
+      <div id="domCap"><span>DOMINANCE</span><span style="color:var(--bull)">76 % ▲</span></div>
+    </div>
+    <div id="oiBlock">
+      <span class="tag" style="top:-9px; right:8px">C · NOUVEAU</span>
+      <div class="row"><span class="k">OPEN INTEREST 15'</span><span class="dn">−2.4 % ▼</span></div>
+      <div class="row"><span class="k">FUNDING · 02:14</span><span class="fund">+0.0128 %</span></div>
+      <div class="regime">SQUEEZE SHORTS</div>
+    </div>
+    <div id="chan"><canvas id="chanCv"></canvas></div>
+    <div id="journal">
+      <div class="t">JOURNAL</div>
+      <div class="ev"><i style="background:var(--bull)"></i><b style="color:var(--bull)">1.84M</b>
+        <span style="color:#6e6a58">SHORT</span><span class="tm">15:42</span></div>
+      <div class="ev"><i style="background:var(--bull)"></i><b style="color:var(--bull)">0.61M</b>
+        <span style="color:#6e6a58">SHORT</span><span class="tm">15:41</span></div>
+      <div class="ev"><i style="background:var(--bear)"></i><b style="color:var(--bear)">0.32M</b>
+        <span style="color:#6e6a58">LONG</span><span class="tm">15:38</span></div>
+    </div>
+  </div>
+
+  <div id="legend">
+    <span><b>A</b> volume coloré par le camp agresseur + delta net + ◆ divergence</span>
+    <span><b>B1</b> jauge d'absorption dans le chip du niveau</span>
+    <span><b>B2</b> anneau de touche</span>
+    <span><b>C</b> OI · funding · régime</span>
+  </div>
+
+<script>
+"use strict";
+const BULL = '#3ecfd4', BEAR = '#ff2d5e', GOLD = '#d9b64d', GOLD_B = '#f0d478';
+const rgba = (hex, a) => { const n = parseInt(hex.slice(1), 16);
+  return `rgba(${n>>16&255},${n>>8&255},${n&255},${a})`; };
+
+/* scénario : descente -> touches ABSORBÉES sur le POI -> rebond */
+const N = 44, POI = 64980, POI2 = 65290;
+const C = [];
+(function build() {
+  let p = 65340, seed = 7;
+  const rnd = () => (seed = (seed*1103515245+12345)%2147483648)/2147483648;
+  const path = [
+    {n:5, drift:-13, vol:.35, d:-.25}, {n:9, drift:-26, vol:.7, d:-.75},
+    {n:8, drift:-2, vol:1.0, d:-.85, touch:true},
+    {n:7, drift:+7, vol:.65, d:+.35}, {n:9, drift:+20, vol:.8, d:+.7}, {n:6, drift:+8, vol:.45, d:+.4},
+  ];
+  for (const ph of path) for (let i = 0; i < ph.n; i++) {
+    const o = p;
+    let c2 = p + ph.drift + (rnd()-.5)*22;
+    if (ph.touch) c2 = Math.max(POI + 4 + rnd()*26, c2);
+    let l = Math.min(o, c2) - rnd()*20;
+    if (ph.touch) l = POI - rnd()*8; else if (l < POI + 12) l = POI + 12;
+    const h = Math.max(o, c2) + rnd()*18;
+    C.push({ o, h, l, c: c2, vol: ph.vol*(0.55+rnd()*.9),
+      delta: Math.max(-1, Math.min(1, ph.d + (rnd()-.5)*.3)) });
+    p = c2;
+  }
+})();
+
+const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+function sizeOf(c) { const r = c.getBoundingClientRect(), d = devicePixelRatio||1;
+  c.width = Math.round(r.width*d); c.height = Math.round(r.height*d);
+  c.getContext('2d').setTransform(d,0,0,d,0,0); return [r.width, r.height]; }
+
+function draw(now) {
+  const [W, H] = sizeOf(cv);
+  ctx.clearRect(0, 0, W, H);
+  const left = 14, right = W - 128, top = 24, volH = 86, volTop = H - volH - 14, bottom = volTop - 40;
+  const plotW = right - left, plotH = bottom - top;
+  let lo = Infinity, hi = -Infinity;
+  for (const b of C) { if (b.l < lo) lo = b.l; if (b.h > hi) hi = b.h; }
+  lo -= 25; hi += 25;
+  const X = i => left + (i + .5)/N*plotW, Y = p => top + (hi - p)/(hi - lo)*plotH;
+  const bw = Math.max(4, plotW/N*.55);
+
+  ctx.strokeStyle = 'rgba(217,182,77,.06)';
+  for (let g = 0; g <= 6; g++) { const y = top + g/6*plotH;
+    ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(W - 8, y); ctx.stroke(); }
+  ctx.fillStyle = '#9d8a52'; ctx.font = '600 11px Segoe UI';
+  ctx.fillText('BTCUSDT · Perp · 15s', left, 14);
+
+  /* niveau CÉDÉ (chip gris, jauge vide) */
+  const y2 = Y(POI2);
+  ctx.setLineDash([5,4]); ctx.strokeStyle = rgba(BEAR,.3);
+  ctx.beginPath(); ctx.moveTo(left, y2); ctx.lineTo(X(6), y2); ctx.stroke(); ctx.setLineDash([]);
+  chip(X(6)+8, y2, '65,290', '61', BEAR, { gauge:.15, state:'CÈDE', dead:true });
+
+  /* niveau DÉFENDU : ligne laser + B2 + chip B1 collé au bord droit comme dans l'app */
+  const y1 = Y(POI), pulse = .55 + .45*Math.sin(now*.004);
+  ctx.strokeStyle = rgba(BULL, .5+.3*pulse); ctx.lineWidth = 1.6;
+  ctx.shadowColor = BULL; ctx.shadowBlur = 6+6*pulse;
+  ctx.beginPath(); ctx.moveTo(left, y1); ctx.lineTo(right, y1); ctx.stroke(); ctx.shadowBlur = 0;
+
+  const tx = X(18), absorb = .78;
+  ctx.strokeStyle = rgba(GOLD_B,.25); ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.arc(tx, y1, 14, 0, Math.PI*2); ctx.stroke();
+  ctx.strokeStyle = rgba(GOLD_B, .55+.35*pulse); ctx.shadowColor = GOLD_B; ctx.shadowBlur = 8*pulse;
+  ctx.beginPath(); ctx.arc(tx, y1, 14, -Math.PI/2, -Math.PI/2 + absorb*Math.PI*2); ctx.stroke();
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = GOLD_B; ctx.font = '700 8px Consolas, monospace'; ctx.textAlign = 'center';
+  ctx.fillText('78%', tx, y1+3); ctx.textAlign = 'left';
+  tag(tx - 12, y1 + 22, 'B2');
+
+  chip(right + 4, y1, '64,980', '74', BULL, { gauge: absorb, state:'⌾ DÉFENDU', pulse });
+  tag(right + 4, y1 - 26, 'B1 · NOUVEAU');
+
+  /* bougies */
+  for (let i = 0; i < N; i++) {
+    const b = C[i], x = X(i), up = b.c >= b.o, col = up ? BULL : BEAR;
+    ctx.strokeStyle = rgba(col,.9); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x, Y(b.h)); ctx.lineTo(x, Y(b.l)); ctx.stroke();
+    ctx.fillStyle = rgba(col,.85);
+    ctx.fillRect(x - bw/2, Math.min(Y(b.o),Y(b.c)), bw, Math.max(1.5, Math.abs(Y(b.c)-Y(b.o))));
+  }
+
+  /* divergence */
+  const dx = X(21), dy = Y(C[21].l) + 15;
+  ctx.fillStyle = GOLD_B; ctx.shadowColor = GOLD_B; ctx.shadowBlur = 6;
+  ctx.beginPath(); ctx.moveTo(dx,dy-5); ctx.lineTo(dx+5,dy); ctx.lineTo(dx,dy+5); ctx.lineTo(dx-5,dy);
+  ctx.closePath(); ctx.fill(); ctx.shadowBlur = 0;
+  ctx.font = '700 9px Segoe UI'; ctx.fillText('DIV', dx + 9, dy + 3);
+
+  /* rangée VOLUME × DELTA (A) — à la place de l'actuelle rangée volume */
+  ctx.fillStyle = '#6e6a58'; ctx.font = '9px Segoe UI';
+  ctx.fillText('VOLUME × DELTA', left, volTop - 4);
+  tag(left + 96, volTop - 13, 'A · NOUVEAU');
+  let vmax = 0; for (const b of C) if (b.vol > vmax) vmax = b.vol;
+  for (let i = 0; i < N; i++) {
+    const b = C[i], x = X(i), h2 = b.vol/vmax*(volH - 20);
+    const col = b.delta >= 0 ? BULL : BEAR;
+    ctx.fillStyle = rgba(col, .25 + .6*Math.abs(b.delta));
+    ctx.fillRect(x - bw/2, volTop + (volH-20) - h2, bw, h2);
+    ctx.fillStyle = rgba(col,.95);
+    const dh = Math.abs(b.delta)*8 + 1;
+    ctx.fillRect(x - bw/2, volTop + (volH-20) - h2 - dh - 2, bw, dh);
+  }
+
+  requestAnimationFrame(draw);
+}
+
+/* chip niveau à la charte app + jauge B1 */
+function chip(x, y, price, score, col, opt) {
+  const w = 112, h = opt.dead ? 26 : 30;
+  ctx.fillStyle = 'rgba(8,7,4,.92)';
+  ctx.strokeStyle = rgba(opt.dead ? '#6e6a58' : col, .85); ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.roundRect(x, y - h/2, w, h, 4); ctx.fill(); ctx.stroke();
+  ctx.font = '700 11px Consolas, monospace';
+  ctx.fillStyle = opt.dead ? '#8d8875' : '#f2ead2';
+  ctx.fillText(price, x + 7, y - (opt.dead ? -3 : 3));
+  ctx.fillStyle = rgba(col,.9); ctx.font = '700 9px Consolas, monospace';
+  ctx.fillText(score, x + 58, y - (opt.dead ? -3 : 3));
+  ctx.font = '700 7.5px Segoe UI';
+  ctx.fillStyle = opt.dead ? '#8d8875' : GOLD_B;
+  ctx.fillText(opt.state, x + 72, y - (opt.dead ? -3 : 3));
+  const gw = w - 14, gx = x + 7, gy = y + (opt.dead ? 8 : 5);
+  if (!opt.dead || true) {
+    ctx.fillStyle = 'rgba(110,106,88,.25)'; ctx.fillRect(gx, gy, gw, 3.5);
+    ctx.fillStyle = rgba(opt.dead ? '#6e6a58' : GOLD_B, opt.dead ? .5 : .6 + .4*(opt.pulse ?? 0));
+    if (!opt.dead) { ctx.shadowColor = GOLD_B; ctx.shadowBlur = 5*(opt.pulse ?? 0); }
+    ctx.fillRect(gx, gy, gw*opt.gauge, 3.5); ctx.shadowBlur = 0;
+  }
+}
+function tag(x, y, txt) {
+  ctx.font = '700 8px Segoe UI';
+  const w = ctx.measureText(txt).width + 10;
+  const g = ctx.createLinearGradient(0, y, 0, y + 13);
+  g.addColorStop(0, GOLD_B); g.addColorStop(1, GOLD);
+  ctx.fillStyle = g; ctx.beginPath(); ctx.roundRect(x, y, w, 13, 3); ctx.fill();
+  ctx.fillStyle = '#060604'; ctx.fillText(txt, x + 5, y + 9.5);
+}
+
+/* profil de volume simplifié (colonne CARNET & PROFIL) */
+const prof = document.getElementById('prof'), pctx = prof.getContext('2d');
+function drawProf() {
+  const [W, H] = sizeOf(prof);
+  pctx.clearRect(0, 0, W, H);
+  let seed = 3; const rnd = () => (seed = (seed*1103515245+12345)%2147483648)/2147483648;
+  for (let i = 0; i < 26; i++) {
+    const y = 8 + i/26*(H-16), poc = i === 11;
+    const wl = (0.2 + rnd()*.8)*(poc ? 1 : .8)*(W*.45);
+    const ws = (0.2 + rnd()*.8)*(poc ? 1 : .8)*(W*.45);
+    pctx.fillStyle = rgba(BULL, poc ? .9 : .45); pctx.fillRect(W - wl - ws - 6, y, wl, 7);
+    pctx.fillStyle = rgba(BEAR, poc ? .9 : .45); pctx.fillRect(W - ws - 6, y, ws, 7);
+  }
+}
+drawProf(); addEventListener('resize', drawProf);
+
+/* canal d'orbes simplifié */
+const chanCv = document.getElementById('chanCv'), cctx = chanCv.getContext('2d');
+const orbs = Array.from({length: 7}, (_, i) => ({ x: 20 + i*28, y: Math.random()*80, up: i % 3 === 0, r: i % 4 ? 2.5 : 5 }));
+function drawChan() {
+  const [W, H] = sizeOf(chanCv);
+  cctx.clearRect(0, 0, W, H);
+  for (const o of orbs) {
+    o.y += o.up ? -.5 : .5;
+    if (o.y < -6) o.y = H + 6; if (o.y > H + 6) o.y = -6;
+    const col = o.up ? BULL : BEAR;
+    cctx.fillStyle = rgba(col, o.r > 3 ? .8 : .35);
+    if (o.r > 3) { cctx.shadowColor = col; cctx.shadowBlur = 6; }
+    cctx.beginPath(); cctx.arc(o.x % (W||200), o.y, o.r, 0, Math.PI*2); cctx.fill();
+    cctx.shadowBlur = 0;
+  }
+  requestAnimationFrame(drawChan);
+}
+requestAnimationFrame(drawChan);
+requestAnimationFrame(draw);
+</script>
+</body>
+</html>
