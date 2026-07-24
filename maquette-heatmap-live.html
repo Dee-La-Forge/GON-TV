@@ -204,6 +204,7 @@ function render() {
   ctx.clearRect(0, 0, W, H);
   const left = 10, right = W - 76, top = 22, bottom = H - 46;
   const plotW = right - left, plotH = bottom - top;
+  const projW = Math.min(150, Math.round(plotW*.15)), histW = plotW - projW;
   if (samples.length < 2) {
     ctx.fillStyle = '#7d795f'; ctx.font = '11px Segoe UI'; ctx.textAlign = 'center';
     ctx.fillText('le carnet réel se remplit… (première image dans ~5 s)', W/2, H/2); ctx.textAlign = 'left';
@@ -251,26 +252,26 @@ function render() {
       /* NET : pixels francs — SILLAGE : le même, assourdi, en fond de contexte */
       ctx.imageSmoothingEnabled = false;
       if (style === 'sillage') ctx.globalAlpha = .30;
-      ctx.drawImage(off, 0, 0, vis.length, rows, left, top, plotW, plotH);
+      ctx.drawImage(off, 0, 0, vis.length, rows, left, top, histW, plotH);
       ctx.globalAlpha = 1;
     } else if (braise) {
       /* BRAISE : halo lissé + grain net par-dessus (2 drawImage du même buffer) */
       ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
-      ctx.drawImage(off, 0, 0, vis.length, rows, left, top, plotW, plotH);
+      ctx.drawImage(off, 0, 0, vis.length, rows, left, top, histW, plotH);
       ctx.imageSmoothingEnabled = false; ctx.globalAlpha = .30;
-      ctx.drawImage(off, 0, 0, vis.length, rows, left, top, plotW, plotH);
+      ctx.drawImage(off, 0, 0, vis.length, rows, left, top, histW, plotH);
       ctx.globalAlpha = 1;
     } else {
       /* SOIE / CAMPS / base FILAMENTS & CICATRICE : colonnes franches en X, fondu seulement en Y
          (étirement en 2 temps : X sans lissage, puis Y avec lissage GPU) */
-      tmp.width = Math.max(1, Math.round(plotW)); tmp.height = rows;
+      tmp.width = Math.max(1, Math.round(histW)); tmp.height = rows;
       tctx.imageSmoothingEnabled = false;
       tctx.clearRect(0, 0, tmp.width, rows);
       tctx.drawImage(off, 0, 0, vis.length, rows, 0, 0, tmp.width, rows);
       ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
       if (style === 'filaments') ctx.globalAlpha = .45;
       if (style === 'cicatrice') ctx.globalAlpha = .40;
-      ctx.drawImage(tmp, 0, 0, tmp.width, rows, left, top, plotW, plotH);
+      ctx.drawImage(tmp, 0, 0, tmp.width, rows, left, top, histW, plotH);
       ctx.globalAlpha = 1;
     }
   }
@@ -279,7 +280,7 @@ function render() {
     /* FILAMENTS : la base en retrait + les murs en traits laser, le langage de l'app.
        Épaisseur = taille du mur ; la valeur se lit sans effort. */
     const FIL_T = .32;                                    /* filament dès ~3.5× la normale */
-    const cw2 = plotW / vis.length, rh = plotH / rows;
+    const cw2 = histW / vis.length, rh = plotH / rows;
     for (let k = kLo; k <= kHi; k++) {
       const y = top + (kHi - k + .5)*rh;
       let i0 = -1, qMax = 0;
@@ -343,7 +344,7 @@ function render() {
 
   if (style === 'lingot') {
     /* LINGOT : corps d'ombre massif, chant poli qui accroche la lumière, poinçons de tenue */
-    const cw2 = plotW/vis.length, rh = plotH/rows;
+    const cw2 = histW/vis.length, rh = plotH/rows;
     for (const r0 of runsOf(.35, 2)) {
       const q = r0.qMax, y = top + (kHi - r0.k + .5)*rh;
       const x0 = left + r0.i0*cw2, w = (r0.i1 - r0.i0)*cw2;
@@ -368,7 +369,7 @@ function render() {
 
   if (style === 'sillage') {
     /* SILLAGE : l'âge d'un mur = la longueur de son trait ; fuite = cassure + fantôme pointillé */
-    const cw2 = plotW/vis.length, rh = plotH/rows;
+    const cw2 = histW/vis.length, rh = plotH/rows;
     const rs = runsOf(.32, 4);
     for (const r0 of rs) r0.camp = (r0.k + .5)*binSize < vis[r0.i0].mid ? BULL : BEAR;
     rs.sort((a, b) => b.qMax - a.qMax);
@@ -388,7 +389,7 @@ function render() {
         ctx.fillStyle = rgba(r0.camp, .9);                /* la cassure */
         ctx.fillRect(x1 - 1, y - h, 1, 2*h);
         ctx.strokeStyle = rgba(r0.camp, .12); ctx.lineWidth = 1; ctx.setLineDash([2,4]);
-        ctx.beginPath(); ctx.moveTo(x1, y + .5); ctx.lineTo(left + plotW, y + .5); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(x1, y + .5); ctx.lineTo(left + histW, y + .5); ctx.stroke();
         ctx.setLineDash([]);
       }
     }
@@ -396,7 +397,7 @@ function render() {
 
   if (style === 'cicatrice') {
     /* CICATRICE : naissances jalonnées, fuites gravées (contour barré + heure) sur fond assourdi */
-    const cw2 = plotW/vis.length, rh = plotH/rows;
+    const cw2 = histW/vis.length, rh = plotH/rows;
     const evs = runsOf(.35, 24);
     for (const r0 of evs) r0.camp = (r0.k + .5)*binSize < vis[r0.i0].mid ? BULL : BEAR;
     evs.sort((a, b) => (b.live - a.live) || (b.i1 - a.i1) || (b.qMax - a.qMax));
@@ -411,7 +412,7 @@ function render() {
         ctx.beginPath(); ctx.moveTo(x0, y - 3); ctx.lineTo(x0 + 4, y); ctx.lineTo(x0, y + 3);
         ctx.closePath(); ctx.fill();
         ctx.fillStyle = rgba(r0.camp, .30);               /* trait de vie */
-        ctx.fillRect(x0, y, left + plotW - x0, 1);
+        ctx.fillRect(x0, y, left + histW - x0, 1);
         for (let n = 1, c = r0.i0 + 120; c < vis.length && n <= 12; n++, c += 120) {
           ctx.fillStyle = rgba(r0.camp, .5);              /* une encoche par 5 min tenues */
           ctx.fillRect(left + c*cw2, y + 2, 1, 2);
@@ -441,7 +442,7 @@ function render() {
     for (const [k, q] of hot) {
       const y = top + (kHi - k + .5)*rh;
       ctx.fillStyle = rgba(GOLD_B, .25);
-      ctx.beginPath(); ctx.arc(left + plotW - 5, y, 4 + 3*q, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(left + histW - 5, y, 4 + 3*q, 0, Math.PI*2); ctx.fill();
     }
 
     if (showScale) {
@@ -471,6 +472,26 @@ function render() {
     }
   }
 
+  /* ---- L'AVANCE : le carnet ACTUEL projeté à droite du présent ----
+     (pas une prédiction : ce sont les ordres réellement posés — ce que le prix va rencontrer) */
+  ctx.strokeStyle = 'rgba(217,182,77,.22)'; ctx.lineWidth = 1;
+  ctx.setLineDash([2,3]);
+  ctx.beginPath(); ctx.moveTo(left + histW + .5, top); ctx.lineTo(left + histW + .5, bottom); ctx.stroke();
+  ctx.setLineDash([]);
+  {
+    const lastS = vis[vis.length - 1], rh2 = plotH/rows, dual2 = style === 'camps';
+    for (const [k, v] of lastS.bins) {
+      if (k < kLo || k > kHi) continue;
+      const q = qOf(v); if (q <= 0) continue;
+      const L = style === 'braise' ? LUT_BRAISE : dual2 ? ((k + .5)*binSize < lastS.mid ? LUT_BULL : LUT_BEAR) : LUT_OR;
+      const li = Math.min(255, Math.round(q*255))*4;
+      ctx.fillStyle = `rgba(${L[li]},${L[li+1]},${L[li+2]},${(L[li+3]/255)*.55})`;
+      ctx.fillRect(left + histW + 2, top + (kHi - k)*rh2, projW - 2, rh2 + .5);
+    }
+    ctx.fillStyle = '#7d795f'; ctx.font = '8px Segoe UI';
+    ctx.fillText('EN AVANCE · carnet posé', left + histW + 6, top + 10);
+  }
+
   /* échelle de prix réelle */
   ctx.fillStyle = '#7d795f'; ctx.font = '10px Consolas, monospace';
   ctx.strokeStyle = 'rgba(217,182,77,.06)';
@@ -486,7 +507,7 @@ function render() {
   ctx.strokeStyle = rgba(BULL, .9); ctx.lineWidth = 1.4;
   ctx.shadowColor = BULL; ctx.shadowBlur = 5;
   ctx.beginPath();
-  const cw = plotW / vis.length;
+  const cw = histW / vis.length;
   for (let i = 0; i < vis.length; i++) {
     const x = left + (i + .5)*cw, y = Y(vis[i].mid);
     i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
@@ -499,7 +520,7 @@ function render() {
   ctx.font = '700 10px Consolas, monospace';
   ctx.fillText(vis[vis.length-1].mid.toFixed(priceDec), right + 6, lastY + 3);
 
-  lastView = { left, top, plotW, plotH, kLo, kHi, rows, vis, med, qOf };
+  lastView = { left, top, plotW, plotH, histW, kLo, kHi, rows, vis, med, qOf };
 }
 
 /* survol : la valeur exacte de n'importe quel point de l'histoire */
@@ -509,7 +530,9 @@ cv.addEventListener('mousemove', e => {
   if (!V) { tip.style.display = 'none'; return; }
   const r = cv.getBoundingClientRect();
   const mx = e.clientX - r.left, my = e.clientY - r.top;
-  const i = Math.floor((mx - V.left)/V.plotW*V.vis.length);
+  if (mx - V.left > V.plotW) { tip.style.display = 'none'; return; }
+  const inProj = mx - V.left > V.histW;
+  const i = inProj ? V.vis.length - 1 : Math.floor((mx - V.left)/V.histW*V.vis.length);
   const k = V.kHi - Math.floor((my - V.top)/V.plotH*V.rows);
   if (i < 0 || i >= V.vis.length || k < V.kLo || k > V.kHi) { tip.style.display = 'none'; return; }
   const v = V.vis[i].bins.get(k) || 0;
@@ -517,7 +540,7 @@ cv.addEventListener('mousemove', e => {
   const d = new Date(V.vis[i].t);
   const hh = `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`;
   tip.innerHTML = `<b>${((k + .5)*binSize).toFixed(priceDec)}</b> — <b>${fmtUsd(v)}</b>` +
-    ` <span style="color:#7d795f">posés · ${hh} · ${(v/V.med).toFixed(0)}× la normale</span>`;
+    ` <span style="color:#7d795f">posés · ${inProj ? 'EN AVANCE (carnet actuel)' : hh} · ${(v/V.med).toFixed(0)}× la normale</span>`;
   tip.style.left = (e.clientX + 14) + 'px';
   tip.style.top  = (e.clientY + 12) + 'px';
   tip.style.display = 'block';
