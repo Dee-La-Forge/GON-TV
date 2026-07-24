@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>G-ON — HEATMAP · CARNET RÉEL BINANCE</title>
+<style>
+  :root { --bg:#060604; --gold:#d9b64d; --gold-b:#f0d478; --gold-d:#6b5a2a; --border:#26200e;
+          --bull:#3ecfd4; --bear:#ff2d5e; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--bg); color:#cbb26a; font:12px/1.4 "Segoe UI", system-ui, sans-serif; overflow:hidden; }
+  #topbar { position:fixed; inset:0 0 auto 0; height:40px; display:flex; align-items:center; gap:10px;
+            padding:0 12px; background:#0a0906; border-bottom:1px solid var(--border); z-index:5; }
+  #logo { width:26px; height:26px; border-radius:50%; background:radial-gradient(circle at 35% 35%, #2a2410, #0a0906);
+          border:1px solid var(--gold-d); display:flex; align-items:center; justify-content:center;
+          color:var(--gold-b); font-size:9px; font-weight:700; letter-spacing:.5px; }
+  .symb { background:#0f0d08; border:1px solid var(--border); color:#8d8154; padding:5px 10px;
+          border-radius:4px; font-size:11px; letter-spacing:1px; cursor:pointer; }
+  .symb.on { color:#060604; background:linear-gradient(180deg,var(--gold-b),var(--gold)); font-weight:700;
+             box-shadow:0 0 10px rgba(217,182,77,.35); }
+  #status { margin-left:auto; font-size:10px; letter-spacing:1.5px; color:#7d795f;
+            font-variant-numeric:tabular-nums; }
+  #live { color:var(--gold-b); font-weight:700; }
+  #wallsBox { position:fixed; top:52px; right:78px; z-index:6; background:rgba(10,9,6,.9);
+              border:1px solid var(--border); border-radius:6px; padding:8px 11px; min-width:215px; }
+  #wallsBox .hd { font-size:8.5px; letter-spacing:2.5px; color:var(--gold); margin-bottom:5px; }
+  #wallsBox .row { display:flex; justify-content:space-between; gap:12px; font-size:10.5px; padding:1.5px 0;
+                   font-variant-numeric:tabular-nums; }
+  #wallsBox .p { font-family:Consolas, monospace; color:var(--gold-b); }
+  #wallsBox .k { color:#7d795f; font-size:9px; letter-spacing:.6px; }
+  #wallsBox .fled .p { color:#6e6a58; text-decoration:line-through; }
+  #wallsBox .fled .k { color:#8a5560; }
+  #legend { position:fixed; bottom:8px; left:50%; transform:translateX(-50%); z-index:8;
+            background:rgba(10,9,6,.95); border:1px solid var(--gold-d); border-radius:6px;
+            padding:8px 14px; font-size:10px; color:#b3a67f; display:flex; gap:16px; align-items:center; }
+  #legend b { color:var(--gold-b); }
+  #legend button { background:#0f0d08; border:1px solid var(--border); color:#8d8154; padding:4px 10px;
+                   border-radius:3px; font-size:10px; letter-spacing:1px; cursor:pointer; }
+  #legend button.on { color:#060604; background:linear-gradient(180deg,var(--gold-b),var(--gold)); font-weight:700; }
+  canvas#cv { position:fixed; left:0; top:40px; right:0; bottom:0; width:100vw; height:calc(100vh - 40px); }
+</style>
+</head>
+<body>
+  <div id="topbar">
+    <div id="logo">G·ON</div>
+    <button class="symb on" data-s="BTCUSDT">BTCUSDT</button>
+    <button class="symb" data-s="ETHUSDT">ETHUSDT</button>
+    <button class="symb" data-s="SOLUSDT">SOLUSDT</button>
+    <span style="font-size:9px; letter-spacing:2px; color:var(--gold)">◱ HEATMAP · <span id="live">DONNÉES RÉELLES</span></span>
+    <span id="status">connexion…</span>
+  </div>
+
+  <canvas id="cv"></canvas>
+
+  <div id="wallsBox">
+    <div class="hd">MURS SUIVIS · RÉEL</div>
+    <div id="wallsRows"><div class="row"><span class="k">en attente du carnet…</span></div></div>
+  </div>
+
+  <div id="legend">
+    <button id="mH2" class="on">H2 · MURS SEULS</button>
+    <button id="mH1">H1 · RASTER COMPLET</button>
+    <span><b>chaque cellule = liquidité réellement posée</b> (fapi.binance.com, 500 niveaux/côté, sonde 2.5 s) · la page se remplit en vivant</span>
+  </div>
+
+<script>
+"use strict";
+const GOLD = '#d9b64d', GOLD_B = '#f0d478', BULL = '#3ecfd4';
+const rgba = (hex, a) => { const n = parseInt(hex.slice(1), 16);
+  return `rgba(${n>>16&255},${n>>8&255},${n&255},${a})`; };
+const fmtUsd = v => v >= 1e6 ? (v/1e6).toFixed(1)+'M$' : v >= 1e3 ? (v/1e3).toFixed(0)+'k$' : v.toFixed(0)+'$';
+
+const EVERY = 2500, CAP = 1440;               /* 2.5 s × 1440 = 60 min de mémoire */
+let sym = 'BTCUSDT', binSize = 0, priceDec = 1;
+let samples = [], wallHist = new Map(), walls = [], fled = [];
+let mode = 'H2';
+
+const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+function sizeOf(c) { const r = c.getBoundingClientRect(), d = devicePixelRatio||1;
+  c.width = Math.round(r.width*d); c.height = Math.round(r.height*d);
+  c.getContext('2d').setTransform(d,0,0,d,0,0); return [r.width, r.height]; }
+
+document.getElementById('mH1').onclick = () => setMode('H1');
+document.getElementById('mH2').onclick = () => setMode('H2');
+function setMode(m) { mode = m;
+  document.getElementById('mH1').classList.toggle('on', m === 'H1');
+  document.getElementById('mH2').classList.toggle('on', m === 'H2');
+  render(); }
+for (const b of document.querySelectorAll('.symb')) b.onclick = () => {
+  sym = b.dataset.s; binSize = 0; samples = []; wallHist.clear(); walls = []; fled = [];
+  for (const x of document.querySelectorAll('.symb')) x.classList.toggle('on', x === b);
+  document.getElementById('status').textContent = 'connexion…'; render(); };
+
+async function poll() {
+  try {
+    const r = await fetch(`https://fapi.binance.com/fapi/v1/depth?symbol=${sym}&limit=500`);
+    if (!r.ok) throw new Error(r.status);
+    const d = await r.json();
+    if (!d.bids?.length || !d.asks?.length) throw new Error('vide');
+    const mid = (+d.bids[0][0] + +d.asks[0][0]) / 2;
+    if (!binSize) {                                       /* pas de bin : ~0.025 % du prix, arrondi propre */
+      const raw = mid * 2.5e-4, e = Math.pow(10, Math.floor(Math.log10(raw))), m = raw/e;
+      binSize = e * (m < 1.5 ? 1 : m < 3.5 ? 2 : m < 7.5 ? 5 : 10);
+      priceDec = binSize < 1 ? 2 : binSize < 10 ? 1 : 0;
+    }
+    const bins = new Map();                               /* USD réellement posés par palier de prix */
+    for (const [p, q] of d.bids) { const k = Math.floor(+p/binSize); bins.set(k, (bins.get(k)||0) + (+p)*(+q)); }
+    for (const [p, q] of d.asks) { const k = Math.floor(+p/binSize); bins.set(k, (bins.get(k)||0) + (+p)*(+q)); }
+    samples.push({ t: Date.now(), mid, bins });
+    if (samples.length > CAP) samples.shift();
+    trackWalls();
+    render();
+    const mins = (samples.length - 1) * EVERY / 60000;
+    document.getElementById('status').textContent =
+      `fapi.binance.com · pas ${binSize < 1 ? binSize.toFixed(2) : binSize} · ${samples.length} sondes · ${mins.toFixed(1)} min d'histoire`;
+  } catch (e) {
+    document.getElementById('status').textContent = 'Binance injoignable — nouvelle tentative…';
+  }
+}
+
+function trackWalls() {
+  const s = samples[samples.length - 1];
+  let max = 0; for (const v of s.bins.values()) if (v > max) max = v;
+  if (!max) return;
+  const seen = new Set();
+  for (const [k, v] of s.bins) if (v >= .30*max) { wallHist.set(k, (wallHist.get(k)||0) + 1); seen.add(k); }
+  for (const [k, c] of [...wallHist]) if (!seen.has(k)) {
+    if (c >= 48 && (s.bins.get(k)||0) < .12*max) {        /* gros mur tenu ≥2 min qui s'évapore = fuite */
+      const at = new Date();
+      fled.unshift({ p: (k + .5)*binSize, at: `${String(at.getHours()).padStart(2,'0')}:${String(at.getMinutes()).padStart(2,'0')}` });
+      fled = fled.slice(0, 3);
+    }
+    wallHist.delete(k);
+  }
+  walls = [...s.bins].filter(([k, v]) => v >= .45*max && (wallHist.get(k)||0) >= 4)
+    .map(([k, v]) => ({ p: (k + .5)*binSize, usd: v, mins: (wallHist.get(k)||0)*EVERY/60000 }))
+    .sort((a, b) => b.usd - a.usd).slice(0, 4);
+  const rows = walls.map(w =>
+    `<div class="row"><span class="p">${w.p.toFixed(priceDec)}</span>` +
+    `<span class="k">${fmtUsd(w.usd)} · TENU ${w.mins < 1 ? '<1' : Math.round(w.mins)} min</span></div>`)
+    .concat(fled.map(f =>
+      `<div class="row fled"><span class="p">${f.p.toFixed(priceDec)}</span><span class="k">FUITE ${f.at}</span></div>`));
+  document.getElementById('wallsRows').innerHTML =
+    rows.length ? rows.join('') : '<div class="row"><span class="k">accumulation en cours…</span></div>';
+}
+
+function render() {
+  const [W, H] = sizeOf(cv);
+  ctx.clearRect(0, 0, W, H);
+  const left = 10, right = W - 76, top = 22, bottom = H - 46;
+  const plotW = right - left, plotH = bottom - top;
+  if (samples.length < 2) {
+    ctx.fillStyle = '#7d795f'; ctx.font = '11px Segoe UI'; ctx.textAlign = 'center';
+    ctx.fillText('le carnet réel se remplit… (première image dans ~5 s)', W/2, H/2); ctx.textAlign = 'left';
+    return;
+  }
+  const vis = samples.slice(-Math.min(samples.length, 720));
+  const cw = plotW / vis.length;
+
+  /* fenêtre de prix : les mids visibles ± 45 pas */
+  let mLo = Infinity, mHi = -Infinity;
+  for (const s of vis) { if (s.mid < mLo) mLo = s.mid; if (s.mid > mHi) mHi = s.mid; }
+  const pLo = mLo - 45*binSize, pHi = mHi + 45*binSize;
+  const Y = p => top + (pHi - p)/(pHi - pLo)*plotH;
+  const ch = Math.max(1, plotH*binSize/(pHi - pLo));
+  const kLo = Math.floor(pLo/binSize), kHi = Math.ceil(pHi/binSize);
+
+  /* normalisation sur le max VISIBLE — l'alpha module, jamais la teinte */
+  let max = 0;
+  for (const s of vis) for (const [k, v] of s.bins) if (k >= kLo && k <= kHi && v > max) max = v;
+  if (!max) return;
+  const thr = mode === 'H2' ? .30 : .04;
+
+  for (let i = 0; i < vis.length; i++) {
+    const s = vis[i], x = left + i*cw;
+    for (const [k, v] of s.bins) {
+      if (k < kLo || k > kHi) continue;
+      const q = v/max;
+      if (q < thr) continue;
+      if (q >= .70)      ctx.fillStyle = rgba(GOLD_B, .25 + .45*q);
+      else if (q >= .30) ctx.fillStyle = rgba(GOLD,   .12 + .34*q);
+      else               ctx.fillStyle = rgba(GOLD,   .05 + .16*q);
+      ctx.fillRect(x, Y((k + 1)*binSize), cw + .5, ch + .5);
+    }
+  }
+
+  /* échelle de prix réelle */
+  ctx.fillStyle = '#7d795f'; ctx.font = '10px Consolas, monospace';
+  ctx.strokeStyle = 'rgba(217,182,77,.06)';
+  for (let g = 0; g <= 6; g++) {
+    const y = top + g/6*plotH, p = pHi - g/6*(pHi - pLo);
+    ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(right, y); ctx.stroke();
+    ctx.fillText(p.toFixed(priceDec), right + 6, y + 3);
+  }
+  ctx.fillStyle = '#9d8a52'; ctx.font = '600 11px Segoe UI';
+  ctx.fillText(`${sym} · Perp · carnet réel, 500 niveaux/côté`, left, 14);
+
+  /* trajet réel du prix par-dessus */
+  ctx.strokeStyle = rgba(BULL, .9); ctx.lineWidth = 1.4;
+  ctx.shadowColor = BULL; ctx.shadowBlur = 5;
+  ctx.beginPath();
+  for (let i = 0; i < vis.length; i++) {
+    const x = left + (i + .5)*cw, y = Y(vis[i].mid);
+    i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+  }
+  ctx.stroke(); ctx.shadowBlur = 0;
+  const lastY = Y(vis[vis.length-1].mid);
+  ctx.fillStyle = BULL; ctx.font = '700 10px Consolas, monospace';
+  ctx.fillText(vis[vis.length-1].mid.toFixed(priceDec), right + 6, lastY + 3);
+}
+
+addEventListener('resize', render);
+poll();
+setInterval(poll, EVERY);
+</script>
+</body>
+</html>
