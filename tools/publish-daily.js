@@ -20,7 +20,12 @@ const git = (...args) => execFileSync("git", args, { cwd: ROOT, encoding: "utf8"
 function pushRetry() {
   for (let t = 1; t <= 5; t++) {
     try { git("push", "-q", "origin", "main"); return true; }
-    catch (_) { if (t < 5) execFileSync(process.platform === "win32" ? "timeout" : "sleep", process.platform === "win32" ? ["/t", "30", "/nobreak"] : ["30"], { stdio: "ignore" }); }
+    catch (_) {
+      // attente via un enfant Node : `timeout /t` exige une console interactive
+      // et PLANTAIT sous le Task Scheduler (constaté au premier run réel) —
+      // le crash interrompait toute la publication sur un simple aléa réseau.
+      if (t < 5) try { execFileSync(process.execPath, ["-e", "setTimeout(()=>{}, 30000)"], { stdio: "ignore" }); } catch (_) {}
+    }
   }
   return false;
 }
