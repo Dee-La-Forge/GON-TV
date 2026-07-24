@@ -116,6 +116,17 @@
     box-shadow: 0 4px 18px rgba(0,0,0,.75), 0 0 12px rgba(217,182,77,.10);
   }
   .tool:hover::after { opacity: 1; transform: translateY(-50%) translateX(0); transition-delay: .3s; }
+  /* bulle d'aide GLOBALE (demande Meddy) : même charte que les tips des outils,
+     casse normale (phrases), multi-lignes possible (titles des modules) */
+  #uiTip {
+    position: fixed; z-index: 80;
+    background: rgba(10,9,6,.97); border: 1px solid var(--gold-d); color: var(--gold-b);
+    padding: 4px 10px; border-radius: 4px; font-size: 10.5px; letter-spacing: .4px;
+    max-width: 280px; white-space: pre-line; line-height: 1.45;
+    opacity: 0; pointer-events: none; transition: opacity .15s;
+    box-shadow: 0 4px 18px rgba(0,0,0,.75), 0 0 12px rgba(217,182,77,.10);
+  }
+  #uiTip.on { opacity: 1; }
   #eyeBtn .eye-off { display: none; }
   #eyeBtn.hidden-draw .eye-on { display: none; }
   #eyeBtn.hidden-draw .eye-off { display: block; }
@@ -238,14 +249,14 @@
 <div id="topbar">
   <div id="brand"><span id="brandWrap"><img id="brandLogo" src="logo.png" alt="G-Bot"></span></div>
   <div id="symWrap">
-    <button id="symBtn">BTCUSDT ▾</button>
+    <button id="symBtn" title="Changer de symbole — liste et recherche">BTCUSDT ▾</button>
     <div id="symPanel" hidden>
       <input id="symFilter" placeholder="SYMBOLE…" spellcheck="false">
       <div id="symList"></div>
     </div>
   </div>
   <div id="tfs"></div>
-  <button id="replayBtn">⟲ REPLAY</button>
+  <button id="replayBtn" title="Replay — rejouer le passé bougie par bougie (entraînement)">⟲ REPLAY</button>
   <div id="status"><span id="dot"></span><span id="lastPrice">—</span></div>
 </div>
 <div id="main">
@@ -1814,10 +1825,18 @@ chart.subscribeCrosshairMove(p => {
 });
 
 /* ---------- timeframes ---------- */
+const tfFr = t => {   // libellé français de la bulle d'aide des TF
+  const n = parseInt(t, 10) || 1, u = t.replace(/[0-9]/g, '');
+  const U = { s: ['seconde', 'secondes'], m: ['minute', 'minutes'], h: ['heure', 'heures'],
+    d: ['jour', 'jours'], w: ['semaine', 'semaines'], M: ['mois', 'mois'] };
+  const p = U[u] || ['', ''];
+  return n + ' ' + (n > 1 ? p[1] : p[0]);
+};
 TFS.forEach(t => {
   const b = document.createElement('button');
   b.className = 'tfbtn' + (t === tf ? ' on' : '');
   b.textContent = tfLabel(t);
+  b.dataset.tip = 'Bougies de ' + tfFr(t);
   b.onclick = () => {
     if (replay) exitReplay(false);
     // rester où on regarde ; si un backfill est déjà en cours, on garde sa CIBLE (la vue transitoire mentirait)
@@ -3241,6 +3260,45 @@ try {
   applyTheme(valid ? st : { ...THEMES.neon }, false);
 } catch { applyTheme({ ...THEMES.neon }, false); }
 document.querySelectorAll('.tool[data-tip]').forEach(b => b.setAttribute('aria-label', b.dataset.tip));
+
+/* --- BULLES D'AIDE GLOBALES (demande Meddy : chaque fonctionnalité expliquée
+   au survol, élégant et discret). UN moteur par délégation : tout élément
+   portant `title` ou `data-tip` reçoit la bulle stylée après 350 ms. Les
+   `title` natifs sont convertis à la volée en data-tip — les contrôles des
+   modules (POI, liquidations, sonar, confluence) sont couverts SANS les
+   modifier, et la bulle native (moche, lente) ne double jamais la nôtre.
+   Les outils de la barre gauche gardent leur tip CSS dédié (exclus ici). --- */
+const uiTip = document.createElement('div');
+uiTip.id = 'uiTip';
+document.body.appendChild(uiTip);
+let uiTipTimer = 0, uiTipFor = null;
+function hideUiTip() { clearTimeout(uiTipTimer); uiTipTimer = 0; uiTipFor = null; uiTip.classList.remove('on'); }
+document.addEventListener('mouseover', e => {
+  const el = e.target && e.target.closest ? e.target.closest('[data-tip], [title]') : null;
+  if (!el || el === uiTipFor) return;
+  hideUiTip();
+  if (el.classList && el.classList.contains('tool')) return;   // tip CSS dédié de la barre d'outils
+  const t = el.getAttribute('title');
+  if (t) { el.dataset.tip = t; el.removeAttribute('title'); }
+  const txt = el.dataset.tip;
+  if (!txt) return;
+  uiTipFor = el;
+  uiTipTimer = setTimeout(() => {
+    uiTip.textContent = txt;
+    uiTip.style.left = '0px'; uiTip.style.top = '0px';   // reset avant mesure
+    uiTip.classList.add('on');
+    const r = el.getBoundingClientRect(), w = uiTip.offsetWidth, h = uiTip.offsetHeight;
+    let x = Math.max(6, Math.min(innerWidth - w - 6, r.left + r.width / 2 - w / 2));
+    let y = r.bottom + 8;
+    if (y + h > innerHeight - 6) y = r.top - h - 8;   // pas de place dessous : au-dessus
+    uiTip.style.left = x + 'px'; uiTip.style.top = y + 'px';
+  }, 350);
+}, true);
+document.addEventListener('mouseout', e => {
+  if (uiTipFor && !(e.relatedTarget && uiTipFor.contains(e.relatedTarget))) hideUiTip();
+}, true);
+document.addEventListener('mousedown', hideUiTip, true);
+document.addEventListener('wheel', hideUiTip, { capture: true, passive: true });
 $('propKind').setAttribute('aria-label', 'Type de rectangle');
 $('propTf').setAttribute('aria-label', 'TF de la zone');
 $('propWidth').setAttribute('aria-label', 'Épaisseur du trait');
@@ -3429,8 +3487,8 @@ if ('serviceWorker' in navigator && location.hostname.endsWith('github.io')) nav
 <script src="poi/stream.js?v=1"></script>
 <script src="poi/poi-render.js?v=77"></script>
 <script src="poi/poi-feature.js?v=47"></script>
-<script src="poi/liq-flux.js?v=43"></script>
+<script src="poi/liq-flux.js?v=44"></script>
 <script src="poi/whale-sonar.js?v=32"></script>
-<script src="poi/confluence.js?v=34"></script>
+<script src="poi/confluence.js?v=35"></script>
 </body>
 </html>

@@ -710,20 +710,20 @@
         <div class="sym" id="gonLiqSym"></div>
         <div class="gonLiqRule"><i></i></div>
       </div>
-      <div class="gonLiqCnt" style="color:var(--gon-bear,#ff2d5e)">
+      <div class="gonLiqCnt" style="color:var(--gon-bear,#ff2d5e)" title="Total des positions LONGUES liquid&eacute;es sur les 15 derni&egrave;res minutes (symbole affich&eacute;)">
         <span class="num" id="gonLiqNumL">0.0</span><span class="unit">M</span>
         <div class="cap" style="color:rgba(var(--gon-bear-rgb,255,45,94),.55)">&#9660; LONGS BR&Ucirc;L&Eacute;S</div>
       </div>
-      <div class="gonLiqCnt" style="color:var(--gon-bull,#2f8bff)">
+      <div class="gonLiqCnt" style="color:var(--gon-bull,#2f8bff)" title="Total des positions COURTES liquid&eacute;es sur les 15 derni&egrave;res minutes (symbole affich&eacute;)">
         <span class="num" id="gonLiqNumS">0.0</span><span class="unit">M</span>
         <div class="cap" style="color:rgba(var(--gon-bull-rgb,47,139,255),.55)">&#9650; SHORTS BR&Ucirc;L&Eacute;S</div>
       </div>
-      <div id="gonLiqDomWrap">
+      <div id="gonLiqDomWrap" title="Dominance des liquidations 15 min : longs vs shorts, z&eacute;ro au centre &mdash; le c&ocirc;t&eacute; qui d&eacute;borde est celui qui br&ucirc;le le plus">
         <div id="gonLiqDomBar"><div class="l" style="width:0"></div><div class="s" style="width:0"></div><div class="n"></div></div>
         <div id="gonLiqDomCap"><span>DOMINANCE</span><span id="gonLiqPct">&mdash;</span></div>
       </div>
-      <div id="gonLiqChan"><canvas></canvas></div>
-      <div id="gonLiqJournal"><div class="t">JOURNAL</div><div id="gonLiqEvList"></div></div>
+      <div id="gonLiqChan" title="Canal tous-march&eacute;s : chaque orbe = une liquidation en direct. M&eacute;t&eacute;ores brillants = symbole affich&eacute;, petites boules = autres march&eacute;s. Descend = longs, monte = shorts."><canvas></canvas></div>
+      <div id="gonLiqJournal" title="Journal : liquidations &ge; 250 k$ du symbole affich&eacute;, heure locale"><div class="t">JOURNAL</div><div id="gonLiqEvList"></div></div>
       <div id="gonLiqVideo">
         <video src="laforge.mp4" autoplay muted playsinline></video>
         <input type="range" id="gonLiqVol" min="0" max="100" value="70" title="Volume">
