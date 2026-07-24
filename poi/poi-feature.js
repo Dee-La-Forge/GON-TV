@@ -42,7 +42,46 @@
   let poiSocket = null, poiTimer = null, poiRecovering = false, poiBuffer = [];
   let poiTouchWindow = null, poiTouchTimer = null, poiBootstrapController = null;
 
-  function refresh() { render?.setPois(pois.slice()); }
+  function refresh() { rebuildAbsorbZones(); render?.setPois(pois.slice()); render?.setAbsorb?.(poiAbsorb); }
+
+  /* --- ABSORPTION aux touches de niveaux (feature B, spec design 2026-07-24).
+     Par trade : volume AGRESSEUR opposé encaissé pendant qu'un niveau ACTIF a
+     le prix dans sa zone (support -> vendeurs, résistance -> acheteurs).
+     Épisode clos après ~2 bougies du TF courant sans contact ; sortie d'ACTIF
+     pendant l'épisode = verdict CÈDE. Le renderer applique la métrique
+     A = Vabs / 3·Vmed20 et le verdict DÉFENDU (A >= 0.5). Purge 35 s après
+     clôture (rémanence 30 s + marge). Aucune donnée du moteur modifiée. */
+  const poiAbsorb = new Map();   // id -> { vabs, t0, lastAt, state:'live'|'done'|'cede', closedAt }
+  let absorbZones = [];
+  function rebuildAbsorbZones() {
+    absorbZones = [];
+    for (const p of pois) if (p.status === "ACTIVE_UNTOUCHED")
+      absorbZones.push({ id: p.id, lo: p.zoneLow, hi: p.zoneHigh, dir: p.direction });
+    for (const [id, e] of poiAbsorb) {
+      if (e.state === "live" && !absorbZones.some((z) => z.id === id)) { e.state = "cede"; e.closedAt = Date.now(); }
+    }
+  }
+  function trackAbsorb(trade) {
+    const price = trade.price, q = trade.quantity, sellerAggr = !!trade.isBuyerMaker;
+    for (const z of absorbZones) {
+      if (price < z.lo || price > z.hi) continue;
+      let e = poiAbsorb.get(z.id);
+      if (!e || e.state !== "live") { e = { vabs: 0, t0: trade.timestamp, lastAt: 0, state: "live", closedAt: 0 }; poiAbsorb.set(z.id, e); }
+      e.lastAt = trade.timestamp;
+      if (z.dir === "long" ? sellerAggr : !sellerAggr) e.vabs += q;
+    }
+  }
+  function sweepAbsorb() {   // clôtures + purge, cadencé par le flush 250 ms
+    const now = Date.now();
+    const tfS = (window.__gon && Number(window.__gon.tfSec)) || 60;
+    const grace = Math.min(120, Math.max(6, tfS * 2)) * 1000;
+    let hasLive = false;
+    for (const [id, e] of poiAbsorb) {
+      if (e.state === "live") { if (now - e.lastAt > grace) { e.state = "done"; e.closedAt = now; } else hasLive = true; }
+      else if (now - e.closedAt > 35000) poiAbsorb.delete(id);
+    }
+    return hasLive;
+  }
   function log(state, extra) { /* hook statut leger */ if (window.__GON_POI_DEBUG) console.log("[POI]", state, extra || ""); }
 
   // Budget de poids fapi PARTAGE par IP : le bootstrap pagine des milliers de
@@ -511,6 +550,7 @@
     const range = poiTouchWindow; poiTouchWindow = null;
     const updated = B.updatePoiTouches(pois, range, poiConfig);
     if (updated.some((item, i) => item !== pois[i])) { pois = updated; refresh(); }
+    else if (sweepAbsorb() || poiAbsorb.size) render?.setAbsorb?.(poiAbsorb);   // jauges vivantes : repaint cadencé 250 ms
     refreshPoiProvisional();   // cadence par les trades, throttle 750 ms interne
   }
 
@@ -615,7 +655,7 @@
     const result = poiAccumulator.ingest(message);
     result.closed.forEach(processClosedFootprint);
     if (result.accepted && normalized.tradeId != null) poiLastTradeId = normalized.tradeId;
-    if (result.accepted) schedulePoiTouch(normalized);
+    if (result.accepted) { trackAbsorb(normalized); schedulePoiTouch(normalized); }
   }
 
   async function recoverPoiGap(ticker, id, signal, isCurrent) {
@@ -656,6 +696,7 @@
     // (audit 2026-07-24, M1) : sans ce reset, un echec d'archive du symbole
     // SUIVANT laissait calibrer ses POI sur l'histogramme de l'ANCIEN symbole.
     poiScoreCal = null;
+    poiAbsorb.clear(); absorbZones = [];   // épisodes d'absorption de l'ancien symbole jetés
     pois = []; poiHistory = []; refresh();
   }
 

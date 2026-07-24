@@ -89,6 +89,19 @@
     // chaque frame. Tri par score DESC : les filtres de seuil deviennent des
     // break (en vue FORT, seul le prefixe >= 80 est visite).
     let aliveIdx = [], deadIdx = [], ghostIdx = [], winIdx = [];
+    /* B — ABSORPTION (spec design 2026-07-24) : carte id -> épisode fournie
+       par poi-feature ; le renderer applique A = Vabs / 3·Vmed20 (médiane des
+       20 dernières bougies du TF courant), les verdicts et la rémanence 30 s. */
+    let absorbMap = new Map(), vmed20Frame = 0;
+    function absorbOf(poi, nowMs) {
+      const e = absorbMap.get(poi.id);
+      if (!e) return null;
+      const age = e.state === "live" ? 0 : nowMs - e.closedAt;
+      if (e.state !== "live" && age > 30000) return null;
+      const A = vmed20Frame > 0 ? Math.min(1, e.vabs / (3 * vmed20Frame)) : 0;
+      const fade = e.state === "live" ? 1 : age <= 20000 ? 1 : Math.max(0, 1 - (age - 20000) / 10000);
+      return { A, state: e.state, fade, t0: e.t0 };
+    }
     function reindex() {
       aliveIdx = []; deadIdx = []; ghostIdx = []; winIdx = [];
       for (const p of pois) {
@@ -627,13 +640,17 @@
     if (document.fonts && document.fonts.ready) {
       document.fonts.ready.then(() => { chipWidthCache.clear(); mark(); }).catch(() => {});
     }
-    function chipWidth(price, score, elite) {
-      const key = price + "|" + score + (elite ? "|e" : "");
+    function chipWidth(price, score, elite, badge) {
+      const key = price + "|" + score + (elite ? "|e" : "") + (badge ? "|" + badge : "");
       let w = chipWidthCache.get(key);
       if (w == null) {
         ctx.font = PRICE_FONT; const wPrice = ctx.measureText(fmtPrice(price)).width;
         ctx.font = SCORE_FONT; const wScore = ctx.measureText(String(score)).width;
         w = Math.ceil(CHIP_PAD + (elite ? PASTILLE_W : 0) + wPrice + CHIP_RULE_GAP + 1 + CHIP_RULE_GAP + wScore + CHIP_PAD);
+        if (badge) {   // B1 : le badge d'état s'ajoute après un 2e séparateur (spec)
+          ctx.font = "700 8px Segoe UI";
+          w += Math.ceil(CHIP_RULE_GAP + 1 + CHIP_RULE_GAP + ctx.measureText(badge).width);
+        }
         if (chipWidthCache.size > 2000) chipWidthCache.clear();
         chipWidthCache.set(key, w);
       }
@@ -641,19 +658,26 @@
     }
 
     // Chip prix | score. state: "active" | "touched" | "dead". elite: pastille or.
-    function drawChip(px, py, price, score, hue, state, cw, elite) {
+    // absorb (B1, spec design) : {A, state, fade} — le chip s'étend de +6 px
+    // (rail 3 px + remplissage or), badge ⌾ DÉFENDU / CÈDE après le score.
+    const ABS_BADGE = { done: "⌾ DÉFENDU", cede: "CÈDE" };
+    const absorbBadge = (ab) => !ab || ab.state === "live" ? ""
+      : ab.state === "cede" ? ABS_BADGE.cede : (ab.A >= 0.5 ? ABS_BADGE.done : "");
+    function drawChip(px, py, price, score, hue, state, cw, elite, absorb) {
       const priceStr = fmtPrice(price), scoreStr = String(score);
-      if (cw == null) cw = chipWidth(price, score, elite);
+      const badge = absorbBadge(absorb);
+      if (cw == null) cw = chipWidth(price, score, elite, badge);
       const cy = py + TAG_H / 2;
+      const chipH = TAG_H + (absorb ? 6 : 0);
       const alpha = state === "active" ? ALPHA.chipActive : state === "touched" ? ALPHA.chipTouched : ALPHA.chipDead;
       const borderAlpha = state === "active" ? 1 : state === "touched" ? 0.65 : 0.45;
       const scoreAlpha = state === "active" ? 1 : state === "touched" ? 0.75 : 0.70;
       ctx.globalAlpha = alpha;
       ctx.fillStyle = T.chipBg;
-      roundRect(ctx, px, py, cw, TAG_H, 2); ctx.fill();
+      roundRect(ctx, px, py, cw, chipH, 2); ctx.fill();
       // Bordure affinee (0.75px) : hue directionnelle, OR pour les elites
       ctx.strokeStyle = elite ? "rgba(217,182,77,.95)" : rgba(hue, borderAlpha); ctx.lineWidth = 0.75;
-      roundRect(ctx, px + 0.5, py + 0.5, cw - 1, TAG_H - 1, 2); ctx.stroke();
+      roundRect(ctx, px + 0.5, py + 0.5, cw - 1, chipH - 1, 2); ctx.stroke();
       ctx.textAlign = "left"; ctx.textBaseline = "middle";
       // Pastille OR (elites) : disque plein avant le prix
       const xText = px + CHIP_PAD + (elite ? PASTILLE_W : 0);
@@ -675,6 +699,32 @@
       ctx.restore();
       ctx.font = SCORE_FONT; ctx.fillStyle = rgba(hue, scoreAlpha);
       ctx.fillText(scoreStr, xSep + 1 + CHIP_RULE_GAP, cy + 0.5);
+      if (absorb) {   // B1 : rail + remplissage or + badge d'état (spec design)
+        const fadeA = absorb.fade;
+        const gx = px + CHIP_PAD, gw = cw - CHIP_PAD * 2, gy = py + TAG_H + 1;
+        ctx.globalAlpha = alpha * fadeA;
+        ctx.fillStyle = "rgba(110,106,88,.25)";
+        roundRect(ctx, gx, gy, gw, 3, 1.5); ctx.fill();
+        const live = absorb.state === "live";
+        const dead = absorb.state === "cede";
+        ctx.fillStyle = dead ? "rgba(110,106,88,.5)"
+          : rgba("#f0d478", live ? 0.65 + 0.30 * Math.max(0, Math.min(1, (pulseK - 0.2) / 1.6)) : 0.95);
+        if (live && glowBudgetOK) { ctx.shadowColor = "#f0d478"; ctx.shadowBlur = 4; }
+        if (absorb.A > 0) { roundRect(ctx, gx, gy, Math.max(2, gw * absorb.A), 3, 1.5); ctx.fill(); }
+        ctx.shadowBlur = 0;
+        if (badge) {
+          const wScore = ctx.measureText(scoreStr).width;
+          const xSep2 = xSep + 1 + CHIP_RULE_GAP + wScore + CHIP_RULE_GAP;
+          ctx.save(); ctx.lineCap = "butt";
+          ctx.beginPath();
+          ctx.moveTo(Math.round(xSep2) + 0.5, py + 4); ctx.lineTo(Math.round(xSep2) + 0.5, py + TAG_H - 4);
+          ctx.strokeStyle = T.chipRule; ctx.lineWidth = 1; ctx.stroke();
+          ctx.restore();
+          ctx.font = "700 8px Segoe UI";
+          ctx.fillStyle = dead ? "#8d8875" : "#f0d478";
+          ctx.fillText(badge, xSep2 + 1 + CHIP_RULE_GAP, cy + 0.5);
+        }
+      }
       ctx.globalAlpha = 1;
     }
 
@@ -687,17 +737,18 @@
       // Saturation : quand la cascade depasse maxY, tous les chips suivants se
       // clampent au meme y et s'empilent en une pile illisible en bas de pane.
       // Un chip qui chevaucherait le precedent est supprime, pas superpose.
-      let cursor = 2, lastPy = -Infinity;
+      let cursor = 2, lastH = TAG_H, lastPy = -Infinity;
       const placed = [];
       for (const t of tags) {
+        const h = TAG_H + (t.absorb ? 6 : 0);   // chip étendu par la jauge d'absorption (spec B1 : +6 px)
         const py = Math.round(Math.min(maxY, Math.max(t.y - TAG_H / 2, cursor)));
-        if (py - lastPy < TAG_H) continue;
-        t.py = py; lastPy = py; cursor = py + TAG_H + TAG_GAP;
+        if (py - lastPy < lastH) continue;
+        t.py = py; lastPy = py; lastH = h; cursor = py + h + TAG_GAP;
         placed.push(t);
       }
       const rightX = plotW - 3 - rightInset;
       for (const t of placed) {
-        const cw = chipWidth(t.price, t.score, t.elite);
+        const cw = chipWidth(t.price, t.score, t.elite, absorbBadge(t.absorb));   // largeur badge comprise AVANT le positionnement
         const px = Math.round(rightX - cw), cy = t.py + TAG_H / 2;
         const state = t.active ? "active" : "touched";
         const chipAlpha = t.active ? ALPHA.chipActive : ALPHA.chipTouched;
@@ -721,7 +772,40 @@
           ctx.stroke();
           ctx.restore();
         }
-        drawChip(px, t.py, t.price, t.score, t.hue, state, cw, t.elite);
+        drawChip(px, t.py, t.price, t.score, t.hue, state, cw, t.elite, t.absorb);
+      }
+    }
+
+    /* B2 — anneaux d'absorption au point de touche (spec design) : or toujours
+       (l'or = « ça encaisse », jamais la teinte directionnelle), rayon 12,
+       pulse partagé pulseK, max 3 anneaux triés par A, espacement 28 px,
+       budget glow commun (R4). */
+    function drawRings(rings) {
+      if (!rings.length) return;
+      rings.sort((a, b) => b.A - a.A);
+      const kept = [];
+      for (const r of rings) {
+        if (kept.length >= 3) break;
+        if (kept.some((k) => Math.abs(k.y - r.y) < 28)) continue;
+        kept.push(r);
+      }
+      for (const r of kept) {
+        ctx.save();
+        ctx.lineCap = "round";
+        ctx.strokeStyle = "rgba(240,212,120,.22)"; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(r.x, r.y, 12, 0, Math.PI * 2); ctx.stroke();
+        ctx.strokeStyle = rgba("#f0d478", Math.min(1, 0.55 * pulseK));
+        ctx.lineWidth = 2.5;
+        if (glowBudgetOK) { ctx.shadowColor = "#f0d478"; ctx.shadowBlur = Math.min(r.elite ? 4 : 12, 6 * Math.max(0, pulseK - 0.2)); }
+        ctx.beginPath(); ctx.arc(r.x, r.y, 12, -Math.PI / 2, -Math.PI / 2 + r.A * Math.PI * 2); ctx.stroke();
+        ctx.shadowBlur = 0;
+        if (r.A >= 0.10) {
+          ctx.fillStyle = "#f0d478"; ctx.font = "700 8px Consolas, monospace";
+          ctx.textAlign = "center"; ctx.textBaseline = "middle";
+          ctx.fillText(Math.round(r.A * 100) + "%", r.x, r.y + 0.5);
+          ctx.textAlign = "left";
+        }
+        ctx.restore();
       }
     }
 
@@ -812,6 +896,17 @@
       // hierarchie au creux.
       pulseK = 1.0 + 0.80 * Math.sin(now * 0.0031);
       const vis = visibleRangeSec();
+      // Vmed20 (absorption) : médiane du volume des 20 dernières bougies — une
+      // fois par frame, uniquement si des épisodes existent.
+      vmed20Frame = 0;
+      if (absorbMap.size) {
+        const Ad = loadPaintData();
+        if (Ad && Ad.length) {
+          const t20 = Ad.slice(-20).map((b) => b.volume).sort((a, b) => a - b);
+          vmed20Frame = t20[t20.length >> 1] || 0;
+        }
+      }
+      const rings = [];   // candidats anneaux B2 (bornés après collecte)
       // M4 : curseur du replay = derniere bougie de la tranche rejouee (le
       // seam sert dataNow par reference — live: candles, replay: tranche).
       let replayCutMs = 0;
@@ -924,7 +1019,23 @@
         shown.sort((a, b) => rank(a) - rank(b));   // morts d'abord (labels ancres) puis vivants (colonne droite)
         const tags = [];
         const centeredPrices = new Set();
-        for (const poi of shown) { const t = drawLevel(poi, plotW, now, labelled.has(poi.id), centeredPrices); if (t) tags.push(t); }
+        for (const poi of shown) {
+          const t = drawLevel(poi, plotW, now, labelled.has(poi.id), centeredPrices);
+          if (!t) continue;
+          if (t.active && absorbMap.size) {   // B1 : jauge d'absorption sur les chips des niveaux ACTIFS
+            const ab = absorbOf(poi, now);
+            if (ab && (ab.state === "live" || ab.state === "cede" || ab.A >= 0.5)) {
+              t.absorb = ab;
+              if (ab.state === "live") hasEliteVisible = true;   // jauge vivante : repaint pulse ~30 fps (horloge commune)
+              if (ab.state === "live" && ab.A >= 0.15) {   // B2 : candidat anneau au point de touche
+                const rx = gon.timeToX(anchorSec(poi, ab.t0));
+                const ry = gon.priceToY(refPrice(poi));
+                if (rx != null && ry != null && isFinite(rx) && isFinite(ry)) rings.push({ x: rx, y: ry, A: ab.A, elite: !!t.elite });
+              }
+            }
+          }
+          tags.push(t);
+        }
         // Le chip du PROVISOIRE entre dans l'empilement normal de la colonne
         // (tag ordinaire, caret vers sa ligne) : dessine apres coup en
         // s'esquivant, il derivait en cascade sous toute la pile des actifs.
@@ -939,6 +1050,7 @@
         // a droite — SAUF pour un ACTIF (actionnable) au meme prix, qui prime sur
         // le mort et garde son chip.
         drawTags(tags.filter((t) => t.active || !centeredPrices.has(t.price)), plotW, paneH);
+        drawRings(rings);   // B2 : anneaux d'absorption (bornés, après les chips)
         drawProvisional(plotW, paneH);
         drawWins(plotW, paneH, pLo, pHi, vis, now);
       } finally {
@@ -1037,6 +1149,7 @@
 
     return {
       setPois(list) { pois = Array.isArray(list) ? list : []; reindex(); mark(); },
+      setAbsorb(m) { absorbMap = m instanceof Map ? m : new Map(); mark(); },
       setProvisional(p) { prov = p || null; mark(); },
       setRightInset(px) { rightInset = Math.max(0, Number(px) || 0); mark(); },
       setVisible(v) { visible = !!v; mark(); },
