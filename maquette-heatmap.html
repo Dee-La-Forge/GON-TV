@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>G-ON — HEATMAP DE LIQUIDITÉ · maquette intégrée</title>
+<style>
+  :root { --bg:#060604; --gold:#d9b64d; --gold-b:#f0d478; --gold-d:#6b5a2a; --border:#26200e;
+          --bull:#3ecfd4; --bear:#ff2d5e; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--bg); color:#cbb26a; font:12px/1.4 "Segoe UI", system-ui, sans-serif; overflow:hidden; }
+  /* ---------- topbar, réplique de l'app ---------- */
+  #topbar { position:fixed; inset:0 0 auto 0; height:40px; display:flex; align-items:center; gap:10px;
+            padding:0 12px; background:#0a0906; border-bottom:1px solid var(--border); z-index:5; }
+  #logo { width:26px; height:26px; border-radius:50%; background:radial-gradient(circle at 35% 35%, #2a2410, #0a0906);
+          border:1px solid var(--gold-d); display:flex; align-items:center; justify-content:center;
+          color:var(--gold-b); font-size:9px; font-weight:700; letter-spacing:.5px; }
+  #symBtn { background:#0f0d08; border:1px solid var(--border); color:var(--gold-b); padding:5px 10px;
+            border-radius:4px; font-size:12px; letter-spacing:1px; font-weight:600; }
+  .tfbtn { background:none; border:1px solid transparent; color:#8d8154; padding:4px 7px; font-size:11px;
+           border-radius:3px; }
+  .tfbtn.on { color:#060604; background:linear-gradient(180deg,var(--gold-b),var(--gold)); font-weight:700;
+              box-shadow:0 0 10px rgba(217,182,77,.35); }
+  #heatBtn { position:relative; background:#0f0d08; border:1px solid var(--gold-d); color:#060604;
+             background:linear-gradient(180deg,var(--gold-b),var(--gold)); font-weight:700;
+             padding:5px 11px; border-radius:4px; font-size:11px; letter-spacing:2px;
+             box-shadow:0 0 12px rgba(217,182,77,.4); }
+  #replayBtn { margin-left:auto; background:#0f0d08; border:1px solid var(--border); color:var(--gold);
+               padding:5px 12px; border-radius:4px; font-size:11px; letter-spacing:2px; }
+  .tagH { position:absolute; z-index:8; font-size:8.5px; font-weight:700; letter-spacing:1px;
+          color:#060604; background:linear-gradient(180deg,var(--gold-b),var(--gold));
+          border-radius:3px; padding:1.5px 6px; box-shadow:0 0 12px rgba(217,182,77,.5); }
+  /* ---------- rail d'outils, réplique ---------- */
+  #rail { position:fixed; left:0; top:40px; bottom:0; width:40px; background:#0a0906;
+          border-right:1px solid var(--border); display:flex; flex-direction:column; align-items:center;
+          padding-top:10px; gap:9px; z-index:5; }
+  #rail i { width:26px; height:26px; border:1px solid transparent; border-radius:4px; display:flex;
+            align-items:center; justify-content:center; font-style:normal; font-size:13px; color:#8d8154; }
+  #rail i.on { color:#060604; background:linear-gradient(180deg,var(--gold-b),var(--gold)); }
+  /* ---------- colonnes droites, répliques ---------- */
+  #profCol { position:fixed; right:242px; top:40px; bottom:0; width:150px; background:#080704;
+             border-left:1px solid var(--border); z-index:4; }
+  #profCol .hd, #liqCol .hd { font-size:9px; letter-spacing:3px; color:var(--gold); padding:10px 12px 6px; }
+  #liqCol { position:fixed; right:0; top:40px; bottom:0; width:242px; background:#080704;
+            border-left:1px solid var(--border); z-index:4; padding-bottom:8px; }
+  #liqCol .sym { font-size:9px; letter-spacing:2px; color:#6e6a58; padding:0 12px 8px; }
+  .row { display:flex; justify-content:space-between; font-size:11px; padding:2px 12px;
+         font-variant-numeric:tabular-nums; }
+  .row .k { color:#7d795f; font-size:8.5px; letter-spacing:1.6px; align-self:center; }
+  .row .v { font-family:Consolas, monospace; }
+  /* légende bas + sélecteur de rendu */
+  #legend { position:fixed; bottom:8px; left:50%; transform:translateX(-50%); z-index:8;
+            background:rgba(10,9,6,.95); border:1px solid var(--gold-d); border-radius:6px;
+            padding:8px 14px; font-size:10px; color:#b3a67f; display:flex; gap:16px; align-items:center; }
+  #legend b { color:var(--gold-b); }
+  #legend button { background:#0f0d08; border:1px solid var(--border); color:#8d8154; padding:4px 10px;
+                   border-radius:3px; font-size:10px; letter-spacing:1px; cursor:pointer; }
+  #legend button.on { color:#060604; background:linear-gradient(180deg,var(--gold-b),var(--gold)); font-weight:700; }
+  canvas#cv { position:fixed; left:40px; top:40px; right:392px; bottom:0;
+              width:calc(100vw - 432px); height:calc(100vh - 40px); }
+</style>
+</head>
+<body>
+  <div id="topbar">
+    <div id="logo">G·ON</div>
+    <button id="symBtn">BTCUSDT ▾</button>
+    <span>
+      <button class="tfbtn">3s</button><button class="tfbtn on">15s</button><button class="tfbtn">30s</button>
+      <button class="tfbtn">45s</button><button class="tfbtn">1m</button><button class="tfbtn">15m</button>
+      <button class="tfbtn">1h</button><button class="tfbtn">1D</button>
+    </span>
+    <button id="heatBtn">◱ HEAT<span class="tagH" style="top:-10px; right:-14px">NOUVEAU</span></button>
+    <button id="replayBtn">⟲ REPLAY</button>
+  </div>
+  <div id="rail">
+    <i class="on">✛</i><i>╱</i><i>➶</i><i>▭</i><i>◯</i><i>T</i><i>👁</i>
+  </div>
+
+  <canvas id="cv"></canvas>
+
+  <div id="profCol">
+    <div class="hd">CARNET &nbsp;&amp;&nbsp; PROFIL</div>
+    <canvas id="prof" style="position:absolute; inset:34px 0 0 0; width:100%; height:calc(100% - 34px)"></canvas>
+  </div>
+
+  <div id="liqCol">
+    <div class="hd">LIQUIDATIONS · 15'</div>
+    <div class="sym">BTCUSDT</div>
+    <div class="row"><span class="k">OPEN INTEREST 15'</span><span class="v" style="color:var(--bear)">−2.4 % ▼</span></div>
+    <div class="row"><span class="k">FUNDING · 02:14</span><span class="v" style="color:var(--gold-b)">+0.0128 %</span></div>
+    <div class="row" style="margin-top:10px"><span class="k">— MURS SUIVIS —</span><span></span></div>
+    <div class="row"><span class="v" style="color:var(--gold-b)">64,980</span><span class="k">TENU 41 min · POI ✓</span></div>
+    <div class="row"><span class="v" style="color:#cbb26a">65,460</span><span class="k">TENU 58 min</span></div>
+    <div class="row"><span class="v" style="color:#6e6a58; text-decoration:line-through">64,900</span><span class="k" style="color:#8a5560">FUITE 14:52</span></div>
+  </div>
+
+  <div id="legend">
+    <span style="letter-spacing:2px; color:var(--gold)">RENDU :</span>
+    <button id="mH2" class="on">H2 · MURS SEULS (recommandé)</button>
+    <button id="mH1">H1 · RASTER COMPLET</button>
+    <span><b>brillance</b> = taille du mur · <b>longueur</b> = persistance · <b>rupture nette</b> = fuite (spoof)</span>
+  </div>
+
+<script>
+"use strict";
+const BULL = '#3ecfd4', BEAR = '#ff2d5e', GOLD = '#d9b64d', GOLD_B = '#f0d478';
+const rgba = (hex, a) => { const n = parseInt(hex.slice(1), 16);
+  return `rgba(${n>>16&255},${n>>8&255},${n&255},${a})`; };
+
+/* même scénario que la maquette delta : descente -> défense du POI 64,980 -> rebond */
+const N = 44, POI = 64980;
+const C = [];
+(function build() {
+  let p = 65340, seed = 7;
+  const rnd = () => (seed = (seed*1103515245+12345)%2147483648)/2147483648;
+  const path = [
+    {n:5, drift:-13, vol:.35}, {n:9, drift:-26, vol:.7},
+    {n:8, drift:-2, vol:1.0, touch:true},
+    {n:7, drift:+7, vol:.65}, {n:9, drift:+20, vol:.8}, {n:6, drift:+8, vol:.45},
+  ];
+  for (const ph of path) for (let i = 0; i < ph.n; i++) {
+    const o = p;
+    let c2 = p + ph.drift + (rnd()-.5)*22;
+    if (ph.touch) c2 = Math.max(POI + 4 + rnd()*26, c2);
+    let l = Math.min(o, c2) - rnd()*20;
+    if (ph.touch) l = POI - rnd()*8; else if (l < POI + 12) l = POI + 12;
+    const h = Math.max(o, c2) + rnd()*18;
+    C.push({ o, h, l, c: c2 });
+    p = c2;
+  }
+})();
+
+/* ---------- grille de liquidité simulée (temps × prix) ---------- */
+let lo = Infinity, hi = -Infinity;
+for (const b of C) { if (b.l < lo) lo = b.l; if (b.h > hi) hi = b.h; }
+lo -= 90; hi += 60;
+const NB = 56, binP = j => lo + (j + .5)/NB*(hi - lo);
+const binOf = p => Math.max(0, Math.min(NB-1, Math.floor((p - lo)/(hi - lo)*NB)));
+
+/* murs scénarisés :
+   64,980  mur réel — mangé pendant la défense (i 14..21) puis reconstruit  → confluence POI
+   65,460  mur persistant au-dessus — plafond/aimant
+   64,900  spoof : apparaît pendant la descente, S'ÉVAPORE juste avant l'approche (i=13)
+   + liquidité transitoire moyenne pour le réalisme */
+const WALLS = [
+  { p: POI,   from: 0,  to: N,  s: .95, eat: { from: 14, to: 21, min: .40 } },
+  { p: 65460, from: 0,  to: N,  s: .78 },
+  { p: 64900, from: 3,  to: 13, s: .90, spoof: true },
+  { p: 65120, from: 22, to: 34, s: .48 },
+  { p: 65250, from: 28, to: N,  s: .52 },
+];
+const GRID = [];
+(function fill() {
+  let seed = 11;
+  const rnd = () => (seed = (seed*1103515245+12345)%2147483648)/2147483648;
+  for (let i = 0; i < N; i++) {
+    const col = new Float32Array(NB), mid = C[i].c;
+    for (let j = 0; j < NB; j++) {
+      const d = Math.abs(binP(j) - mid);
+      col[j] = Math.max(0, (.10 + .22*Math.exp(-(d/110)*(d/110))) * (.4 + rnd()*.9));
+    }
+    for (const w of WALLS) {
+      if (i < w.from || i >= w.to) continue;
+      let s = w.s * (.88 + rnd()*.12);
+      if (w.eat && i >= w.eat.from && i <= w.eat.to) {
+        const k = (i - w.eat.from)/(w.eat.to - w.eat.from);
+        s *= w.eat.min + (1 - w.eat.min)*Math.abs(k*2 - 1);   /* creuse puis se reconstruit */
+      }
+      const j = binOf(w.p);
+      col[j] = Math.max(col[j], s);
+      if (j > 0)    col[j-1] = Math.max(col[j-1], s*.38);
+      if (j < NB-1) col[j+1] = Math.max(col[j+1], s*.38);
+    }
+    GRID.push(col);
+  }
+})();
+
+const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+function sizeOf(c) { const r = c.getBoundingClientRect(), d = devicePixelRatio||1;
+  c.width = Math.round(r.width*d); c.height = Math.round(r.height*d);
+  c.getContext('2d').setTransform(d,0,0,d,0,0); return [r.width, r.height]; }
+
+let mode = 'H2';
+document.getElementById('mH1').onclick = () => setMode('H1');
+document.getElementById('mH2').onclick = () => setMode('H2');
+function setMode(m) { mode = m;
+  document.getElementById('mH1').classList.toggle('on', m === 'H1');
+  document.getElementById('mH2').classList.toggle('on', m === 'H2'); }
+
+function draw(now) {
+  const [W, H] = sizeOf(cv);
+  ctx.clearRect(0, 0, W, H);
+  const left = 14, right = W - 128, top = 24, bottom = H - 60;
+  const plotW = right - left, plotH = bottom - top;
+  const X = i => left + (i + .5)/N*plotW, Y = p => top + (hi - p)/(hi - lo)*plotH;
+  const bw = Math.max(4, plotW/N*.55);
+  const cw = plotW/N, ch = plotH/NB;
+  const pulse = .55 + .45*Math.sin(now*.004);
+
+  /* ---------- 1. HEATMAP en fond — l'alpha module, jamais la teinte ---------- */
+  const thr = mode === 'H2' ? .40 : .05;
+  for (let i = 0; i < N; i++) {
+    const col = GRID[i], x = left + i/N*plotW;
+    for (let j = 0; j < NB; j++) {
+      const q = col[j];
+      if (q < thr) continue;
+      const y = top + (NB-1-j)/NB*plotH;
+      if (q >= .72)      ctx.fillStyle = rgba(GOLD_B, .22 + .40*q);
+      else if (q >= .40) ctx.fillStyle = rgba(GOLD,   .10 + .30*q);
+      else               ctx.fillStyle = rgba(GOLD,   .04 + .12*q);
+      ctx.fillRect(x, y, cw + .5, ch + .5);
+    }
+  }
+
+  /* ---------- 2. grille + titre, comme dans l'app ---------- */
+  ctx.strokeStyle = 'rgba(217,182,77,.06)';
+  for (let g = 0; g <= 6; g++) { const y = top + g/6*plotH;
+    ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(W - 8, y); ctx.stroke(); }
+  ctx.fillStyle = '#9d8a52'; ctx.font = '600 11px Segoe UI';
+  ctx.fillText('BTCUSDT · Perp · 15s', left, 14);
+
+  /* ---------- 3. niveau POI existant (inchangé) : laser + chip ---------- */
+  const y1 = Y(POI);
+  ctx.strokeStyle = rgba(BULL, .5 + .3*pulse); ctx.lineWidth = 1.6;
+  ctx.shadowColor = BULL; ctx.shadowBlur = 6 + 6*pulse;
+  ctx.beginPath(); ctx.moveTo(left, y1); ctx.lineTo(right, y1); ctx.stroke(); ctx.shadowBlur = 0;
+  chip(right + 4, y1, '64,980', '74', BULL, pulse);
+
+  /* ---------- 4. bougies PAR-DESSUS la heatmap ---------- */
+  for (let i = 0; i < N; i++) {
+    const b = C[i], x = X(i), up = b.c >= b.o, col = up ? BULL : BEAR;
+    ctx.strokeStyle = rgba(col,.9); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x, Y(b.h)); ctx.lineTo(x, Y(b.l)); ctx.stroke();
+    ctx.fillStyle = rgba(col,.85);
+    ctx.fillRect(x - bw/2, Math.min(Y(b.o),Y(b.c)), bw, Math.max(1.5, Math.abs(Y(b.c)-Y(b.o))));
+  }
+
+  /* ---------- 5. annotations pédagogiques (maquette seulement) ---------- */
+  note(X(30), Y(65460) - 14, 'MUR PERSISTANT = aimant', GOLD_B);
+  note(X(6),  Y(64900) + 16, 'FUITE à l’approche = spoof', '#c96e7e');
+  note(X(17), Y(POI) + 26,  'MANGÉ puis RECONSTRUIT · confluence POI ✓', GOLD_B);
+
+  requestAnimationFrame(draw);
+}
+
+function note(x, y, txt, col) {
+  ctx.font = '700 8.5px Segoe UI';
+  const w = ctx.measureText(txt).width + 10;
+  ctx.fillStyle = 'rgba(8,7,4,.88)';
+  ctx.strokeStyle = rgba(col.startsWith('#') ? col : GOLD, .55); ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.roundRect(x - w/2, y - 7, w, 14, 3); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = col; ctx.textAlign = 'center';
+  ctx.fillText(txt, x, y + 3.5); ctx.textAlign = 'left';
+}
+
+function chip(x, y, price, score, col, pulse) {
+  const w = 112, h = 30;
+  ctx.fillStyle = 'rgba(8,7,4,.92)';
+  ctx.strokeStyle = rgba(col, .85); ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.roundRect(x, y - h/2, w, h, 4); ctx.fill(); ctx.stroke();
+  ctx.font = '700 11px Consolas, monospace'; ctx.fillStyle = '#f2ead2';
+  ctx.fillText(price, x + 7, y + 4);
+  ctx.fillStyle = rgba(col,.9); ctx.font = '700 9px Consolas, monospace';
+  ctx.fillText(score, x + 58, y + 4);
+  ctx.fillStyle = GOLD_B; ctx.font = '700 7.5px Segoe UI';
+  ctx.fillText('ACTIF', x + 76, y + 4);
+}
+
+/* profil de volume simplifié (colonne CARNET & PROFIL, inchangée) */
+const prof = document.getElementById('prof'), pctx = prof.getContext('2d');
+function drawProf() {
+  const [W, H] = sizeOf(prof);
+  pctx.clearRect(0, 0, W, H);
+  let seed = 3; const rnd = () => (seed = (seed*1103515245+12345)%2147483648)/2147483648;
+  for (let i = 0; i < 26; i++) {
+    const y = 8 + i/26*(H-16), poc = i === 11;
+    const wl = (0.2 + rnd()*.8)*(poc ? 1 : .8)*(W*.45);
+    const ws = (0.2 + rnd()*.8)*(poc ? 1 : .8)*(W*.45);
+    pctx.fillStyle = rgba(BULL, poc ? .9 : .45); pctx.fillRect(W - wl - ws - 6, y, wl, 7);
+    pctx.fillStyle = rgba(BEAR, poc ? .9 : .45); pctx.fillRect(W - ws - 6, y, ws, 7);
+  }
+}
+drawProf(); addEventListener('resize', drawProf);
+requestAnimationFrame(draw);
+</script>
+</body>
+</html>
