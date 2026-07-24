@@ -31,7 +31,8 @@
   #wallsBox .fled .k { color:#8a5560; }
   #legend { position:fixed; bottom:8px; left:50%; transform:translateX(-50%); z-index:8;
             background:rgba(10,9,6,.95); border:1px solid var(--gold-d); border-radius:6px;
-            padding:8px 14px; font-size:10px; color:#b3a67f; display:flex; gap:10px; align-items:center; }
+            padding:8px 14px; font-size:10px; color:#b3a67f; display:flex; gap:10px; align-items:center;
+            flex-wrap:wrap; justify-content:center; max-width:94vw; white-space:nowrap; }
   #legend b { color:var(--gold-b); }
   #legend button { background:#0f0d08; border:1px solid var(--border); color:#8d8154; padding:4px 10px;
                    border-radius:3px; font-size:10px; letter-spacing:1px; cursor:pointer; }
@@ -63,14 +64,15 @@
 
   <div id="legend">
     <span style="letter-spacing:2px; color:var(--gold)">STYLE :</span>
-    <button data-r="filaments" class="on">FILAMENTS</button>
+    <button data-r="braise" class="on">BRAISE</button>
+    <button data-r="filaments">FILAMENTS</button>
     <button data-r="lingot">LINGOT</button>
-    <button data-r="braise">BRAISE</button>
     <button data-r="sillage">SILLAGE</button>
     <button data-r="cicatrice">CICATRICE</button>
     <button data-r="soie">SOIE</button>
     <button data-r="net">NET</button>
     <button data-r="camps">CAMPS</button>
+    <button id="scaleBtn" class="on">ÉCHELLE $</button>
     <span>· mêmes données réelles · <b>survolez</b> pour la valeur exacte</span>
   </div>
   <div id="tip"></div>
@@ -85,7 +87,8 @@ const fmtUsd = v => v >= 1e6 ? (v/1e6).toFixed(1)+'M$' : v >= 1e3 ? (v/1e3).toFi
 const EVERY = 2500, CAP = 1440;               /* 2.5 s × 1440 = 60 min de mémoire */
 let sym = 'BTCUSDT', binSize = 0, priceDec = 1;
 let samples = [], wallHist = new Map(), walls = [], fled = [];
-let style = 'filaments';
+let style = 'braise';
+let showScale = true;                         /* option : le dégradé en échelle de valeurs $ */
 let lastView = null;                          /* contexte du dernier rendu, pour le survol */
 
 /* ---- rampes 256 teintes précalculées : [q, r, g, b, a] ; plancher net sous q=0.10 ---- */
@@ -133,9 +136,13 @@ for (const b of document.querySelectorAll('.symb')) b.onclick = () => {
   sym = b.dataset.s; binSize = 0; samples = []; wallHist.clear(); walls = []; fled = [];
   for (const x of document.querySelectorAll('.symb')) x.classList.toggle('on', x === b);
   document.getElementById('status').textContent = 'connexion…'; render(); };
-for (const b of document.querySelectorAll('#legend button')) b.onclick = () => {
+for (const b of document.querySelectorAll('#legend button[data-r]')) b.onclick = () => {
   style = b.dataset.r;
-  for (const x of document.querySelectorAll('#legend button')) x.classList.toggle('on', x === b);
+  for (const x of document.querySelectorAll('#legend button[data-r]')) x.classList.toggle('on', x === b);
+  render(); };
+document.getElementById('scaleBtn').onclick = () => {
+  showScale = !showScale;
+  document.getElementById('scaleBtn').classList.toggle('on', showScale);
   render(); };
 
 async function poll() {
@@ -435,6 +442,32 @@ function render() {
       const y = top + (kHi - k + .5)*rh;
       ctx.fillStyle = rgba(GOLD_B, .25);
       ctx.beginPath(); ctx.arc(left + plotW - 5, y, 4 + 3*q, 0, Math.PI*2); ctx.fill();
+    }
+
+    if (showScale) {
+      /* l'option demandée : le dégradé lui-même comme échelle de valeurs, en $ RÉELS
+         (recalculés à chaque sonde — l'échelle est relative à la médiane du carnet) */
+      const sh = 150, sw = 10, sx = left + 12, sy = bottom - 26 - sh;
+      ctx.fillStyle = 'rgba(8,7,4,.82)';
+      ctx.fillRect(sx - 7, sy - 24, 122, sh + 44);
+      ctx.strokeStyle = 'rgba(107,90,42,.5)'; ctx.lineWidth = 1;
+      ctx.strokeRect(sx - 6.5, sy - 23.5, 121, sh + 43);
+      ctx.fillStyle = rgba(GOLD, .9); ctx.font = '8px Segoe UI';
+      ctx.fillText('LIQUIDITÉ POSÉE · RÉEL', sx - 1, sy - 11);
+      for (let p2 = 0; p2 < sh; p2++) {
+        const q = 1 - p2/(sh - 1), li = Math.round(q*255)*4;
+        ctx.fillStyle = `rgba(${LUT_BRAISE[li]},${LUT_BRAISE[li+1]},${LUT_BRAISE[li+2]},${Math.max(.10, LUT_BRAISE[li+3]/255)})`;
+        ctx.fillRect(sx, sy + p2, sw, 1);
+      }
+      ctx.font = '9px Consolas, monospace';
+      for (const q of [1, .82, .47, .16]) {
+        const y = sy + (1 - q)*(sh - 1);
+        ctx.fillStyle = rgba(GOLD_B, .85);
+        ctx.fillRect(sx + sw + 1, y, 3, 1);
+        ctx.fillText(fmtUsd(med*Math.pow(48, q)), sx + sw + 7, y + 3);
+      }
+      ctx.fillStyle = '#7d795f'; ctx.font = '8px Segoe UI';
+      ctx.fillText(`sous ${fmtUsd(med)} : éteint`, sx - 1, sy + sh + 13);
     }
   }
 
