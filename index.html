@@ -347,6 +347,12 @@
       <select id="propStyle" title="Style de trait">
         <option value="solid">───</option><option value="dash">╌ ╌</option><option value="dot">· · ·</option>
       </select>
+      <select id="propSize" title="Taille du texte" hidden>
+        <option value="10">10 px</option><option value="12" selected>12 px</option>
+        <option value="14">14 px</option><option value="16">16 px</option>
+        <option value="20">20 px</option><option value="24">24 px</option>
+        <option value="32">32 px</option><option value="48">48 px</option>
+      </select>
       <div class="pdiv"></div>
       <button class="pbtn" id="propDup" title="Dupliquer">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="8" y="8" width="12" height="12" rx="1.5"/><path d="M16 4H5.5A1.5 1.5 0 004 5.5V16"/></svg>
@@ -2006,6 +2012,7 @@ const inPane = m => m.x <= paneW() && m.y <= paneH();
 const PALETTE = ['#f0d478','#d9b64d','#f2984d','#e0564d','#e04da8','#9b59e0','#4d8fe0','#3ecfd4','#4dc06a','#f5f5f0'];
 const DASHES = { solid: [], dash: [8,5], dot: [2,3] };
 let defaultStyle = { color: '#d9b64d', width: 1.5, dash: 'solid' };
+let textSize = 12;   // taille des PROCHAINS textes (l'outil Texte mémorise le dernier choix)
 /* types sémantiques du rectangle (doctrine) : label + couleur préréglée */
 const RKINDS = { ob: { label: 'OB', color: '#f0d478' }, acc: { label: 'ACC', color: '#f2984d' }, sd: { label: 'S/D', color: '#4d8fe0' } };
 let rectKind = '';        // type appliqué aux prochains rectangles tracés
@@ -2119,13 +2126,14 @@ function drawingOk(d) {
 function loadDrawings() {
   try {
     const arr = JSON.parse(localStorage.getItem('orion-draw-' + symbol));
-    const DKEYS = ['type', 't', 'price', 'a', 'b', 'pts', 'off', 'target', 'stop', 'color', 'width', 'dash', 'kind', 'tfk', 'text'];
+    const DKEYS = ['type', 't', 'price', 'a', 'b', 'pts', 'off', 'target', 'stop', 'color', 'width', 'dash', 'kind', 'tfk', 'text', 'size'];
     drawings = (Array.isArray(arr) ? arr : []).map(d => {
       if (!d || typeof d !== 'object') return d;
       const c = {};   // whitelist : un champ parasite volumineux ne survit pas (quota, origine partagée)
       for (const k of DKEYS) if (d[k] !== undefined) c[k] = d[k];
       // héritage pré-bornes : tronquer plutôt que perdre silencieusement
       if (typeof c.text === 'string' && c.text.length > TEXT_MAX) c.text = c.text.slice(0, TEXT_MAX);
+      if (c.type === 'text') c.size = numOk(c.size) ? Math.max(8, Math.min(72, c.size)) : 12;   // taille bornée (entrée corrompue = police géante sinon)
       if (Array.isArray(c.pts) && c.pts.length > PTS_MAX) c.pts = c.pts.slice(0, PTS_MAX);
       return c;
     }).filter(drawingOk);
@@ -2318,11 +2326,24 @@ function syncPropbar() {
   const dSel = sel != null ? drawings[sel] : null;
   const posSel = !!(dSel && (dSel.type === 'long' || dSel.type === 'short'));
   const alertSel = !!(dSel && dSel.type === 'alert');   // trait forcé pointillé : le sélecteur de style n'a aucun effet
-  $('propStyle').hidden = !!rectCtx || posSel || alertSel;
-  $('propWidth').hidden = posSel;
+  // Texte : épaisseur/style sans effet -> masqués ; la TAILLE prend leur place
+  // (texte sélectionné, ou outil Texte actif = taille des prochains textes).
+  const textSel = !!(dSel && dSel.type === 'text');
+  const textCtx = textSel || (sel == null && tool === 'text');
+  $('propSize').hidden = !textCtx;
+  if (textCtx) $('propSize').value = String(textSel ? (dSel.size || 12) : textSize);
+  $('propStyle').hidden = !!rectCtx || posSel || alertSel || textSel;
+  $('propWidth').hidden = posSel || textSel;
   $('propColor').hidden = posSel;
   $('swatches').hidden = posSel;
 }
+$('propSize').addEventListener('change', e => {
+  const v = Math.max(8, Math.min(72, +e.target.value || 12));
+  const d = sel != null && drawings[sel] && drawings[sel].type === 'text' ? drawings[sel] : null;
+  if (d) { d.size = v; saveDrawings(); invalidate(); }
+  else textSize = v;   // mémorisée pour les prochains textes de la session
+  syncPropbar();
+});
 TFS.forEach(t => {   // 1m → 1M ; nomenclature zones en préfixe : m1…m30, H1…H12, D1, D3, W1, M1
   const o = document.createElement('option');
   o.value = t; o.textContent = zLabel(t);
@@ -2371,7 +2392,7 @@ function commitTxtIn() {   // valide le texte en cours (Entrée, blur, ou re-cli
   const v = t.value.trim().slice(0, TEXT_MAX);   // même borne que drawingOk : jamais de tracé qui périra au rechargement
   if (v) {
     if (editIdx != null) drawings[editIdx].text = v;
-    else if (txtPos) drawings.push({ type: 'text', ...txtPos, ...defaultStyle, text: v });
+    else if (txtPos) drawings.push({ type: 'text', ...txtPos, ...defaultStyle, size: textSize, text: v });
     saveDrawings();
   }
   hideTxtIn();
@@ -2566,7 +2587,11 @@ function hitTest(mx, my) {
     else if (d.type === 'hray') { const [x, y] = px(d); hit = x != null && y != null && Math.abs(my - y) < TH && mx > x - TH; }
     else if (d.type === 'text') {
       const [x, y] = px(d);
-      if (x != null && y != null) { ctx.font = '12px Segoe UI'; const w = ctx.measureText(d.text).width; hit = mx > x - 4 && mx < x + w + 4 && my > y - 14 && my < y + 6; }
+      if (x != null && y != null) {
+        const fs = d.size || 12;   // zone de clic à l'échelle de la police (taille réglable)
+        ctx.font = fs + 'px Segoe UI'; const w = ctx.measureText(d.text).width;
+        hit = mx > x - 4 && mx < x + w + 4 && my > y - fs - 2 && my < y + 6;
+      }
     }
     else if (d.type === 'brush') {
       let prev = px(d.pts[0]);
@@ -2790,7 +2815,7 @@ function drawOne(d, isSel) {
     }
   } else if (d.type === 'text') {
     const [x, y] = px(d);
-    if (x != null && y != null) { ctx.shadowBlur = Math.min(ambGlow, 2); ctx.fillStyle = col; ctx.font = '12px Segoe UI'; ctx.fillText(d.text, x, y); }
+    if (x != null && y != null) { ctx.shadowBlur = Math.min(ambGlow, 2); ctx.fillStyle = col; ctx.font = (d.size || 12) + 'px Segoe UI'; ctx.fillText(d.text, x, y); }
   } else if (d.type === 'brush') {
     ctx.beginPath();
     let started = false;
