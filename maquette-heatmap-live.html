@@ -31,11 +31,10 @@
   #wallsBox .fled .k { color:#8a5560; }
   #legend { position:fixed; bottom:8px; left:50%; transform:translateX(-50%); z-index:8;
             background:rgba(10,9,6,.95); border:1px solid var(--gold-d); border-radius:6px;
-            padding:8px 14px; font-size:10px; color:#b3a67f; display:flex; gap:16px; align-items:center; }
+            padding:8px 14px; font-size:10px; color:#b3a67f; display:flex; gap:14px; align-items:center; }
   #legend b { color:var(--gold-b); }
-  #legend button { background:#0f0d08; border:1px solid var(--border); color:#8d8154; padding:4px 10px;
-                   border-radius:3px; font-size:10px; letter-spacing:1px; cursor:pointer; }
-  #legend button.on { color:#060604; background:linear-gradient(180deg,var(--gold-b),var(--gold)); font-weight:700; }
+  #ramp { width:110px; height:8px; border-radius:4px; border:1px solid #26200e;
+          background:linear-gradient(90deg, rgba(26,20,8,0), #6b5a2a, #d9b64d, #f0d478, #fff8e0); }
   canvas#cv { position:fixed; left:0; top:40px; right:0; bottom:0; width:100vw; height:calc(100vh - 40px); }
 </style>
 </head>
@@ -57,14 +56,14 @@
   </div>
 
   <div id="legend">
-    <button id="mH2" class="on">H2 · MURS SEULS</button>
-    <button id="mH1">H1 · RASTER COMPLET</button>
-    <span><b>chaque cellule = liquidité réellement posée</b> (fapi.binance.com, 500 niveaux/côté ≈ ±0.1 % autour du prix, sonde 2.5 s) · la page se remplit en vivant</span>
+    <span style="letter-spacing:2px; color:var(--gold)">LIQUIDITÉ</span>
+    <span id="ramp"></span>
+    <span><b>brume ambrée → mur blanc-or</b> · carnet réel Binance (500 niveaux/côté ≈ ±0.1 %, sonde 2.5 s) · la page se remplit en vivant</span>
   </div>
 
 <script>
 "use strict";
-const GOLD = '#d9b64d', GOLD_B = '#f0d478', BULL = '#3ecfd4';
+const BULL = '#3ecfd4';
 const rgba = (hex, a) => { const n = parseInt(hex.slice(1), 16);
   return `rgba(${n>>16&255},${n>>8&255},${n&255},${a})`; };
 const fmtUsd = v => v >= 1e6 ? (v/1e6).toFixed(1)+'M$' : v >= 1e3 ? (v/1e3).toFixed(0)+'k$' : v.toFixed(0)+'$';
@@ -72,19 +71,33 @@ const fmtUsd = v => v >= 1e6 ? (v/1e6).toFixed(1)+'M$' : v >= 1e3 ? (v/1e3).toFi
 const EVERY = 2500, CAP = 1440;               /* 2.5 s × 1440 = 60 min de mémoire */
 let sym = 'BTCUSDT', binSize = 0, priceDec = 1;
 let samples = [], wallHist = new Map(), walls = [], fled = [];
-let mode = 'H2';
+
+/* ---- LUT 256 teintes : brume ambrée → or → blanc-or (l'alpha ET la clarté montent) ---- */
+const LUT = new Uint8ClampedArray(256*4);
+(function buildLut() {
+  const stops = [                              /* [q, r, g, b, a] */
+    [0.00,  26,  20,   8,   0],
+    [0.22, 107,  90,  42,  85],
+    [0.50, 217, 182,  77, 160],
+    [0.78, 240, 212, 120, 225],
+    [1.00, 255, 248, 224, 255],
+  ];
+  for (let i = 0; i < 256; i++) {
+    const q = i/255;
+    let a = stops[0], b = stops[stops.length-1];
+    for (let s = 0; s < stops.length-1; s++)
+      if (q >= stops[s][0] && q <= stops[s+1][0]) { a = stops[s]; b = stops[s+1]; break; }
+    const t = (q - a[0]) / ((b[0] - a[0]) || 1);
+    for (let c = 0; c < 4; c++) LUT[i*4+c] = Math.round(a[c+1] + (b[c+1] - a[c+1])*t);
+  }
+})();
 
 const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+const off = document.createElement('canvas'), octx = off.getContext('2d');
 function sizeOf(c) { const r = c.getBoundingClientRect(), d = devicePixelRatio||1;
   c.width = Math.round(r.width*d); c.height = Math.round(r.height*d);
   c.getContext('2d').setTransform(d,0,0,d,0,0); return [r.width, r.height]; }
 
-document.getElementById('mH1').onclick = () => setMode('H1');
-document.getElementById('mH2').onclick = () => setMode('H2');
-function setMode(m) { mode = m;
-  document.getElementById('mH1').classList.toggle('on', m === 'H1');
-  document.getElementById('mH2').classList.toggle('on', m === 'H2');
-  render(); }
 for (const b of document.querySelectorAll('.symb')) b.onclick = () => {
   sym = b.dataset.s; binSize = 0; samples = []; wallHist.clear(); walls = []; fled = [];
   for (const x of document.querySelectorAll('.symb')) x.classList.toggle('on', x === b);
@@ -155,34 +168,34 @@ function render() {
     return;
   }
   const vis = samples.slice(-Math.min(samples.length, 720));
-  const cw = plotW / vis.length;
 
   /* fenêtre de prix : l'étendue RÉELLE du carnet visible sur la période */
   let kLo = Infinity, kHi = -Infinity, max = 0;
   for (const s of vis) for (const k of s.bins.keys()) { if (k < kLo) kLo = k; if (k > kHi) kHi = k; }
   kLo -= 2; kHi += 2;
+  const rows = kHi - kLo + 1;
   const pLo = kLo*binSize, pHi = (kHi + 1)*binSize;
   const Y = p => top + (pHi - p)/(pHi - pLo)*plotH;
-  const ch = Math.max(1, plotH*binSize/(pHi - pLo));
-
-  /* normalisation log sur le max VISIBLE (un méga-mur n'éteint pas le reste) —
-     l'alpha module, jamais la teinte */
   for (const s of vis) for (const v of s.bins.values()) if (v > max) max = v;
   if (!max) return;
-  const thr = mode === 'H2' ? .38 : .07;
 
+  /* ---- LE rendu : 1 px par sonde × 1 px par palier, LUT, puis lissage GPU ----
+     (en prod : on n'écrirait qu'UNE colonne par sonde ; ici on refait la mini-image,
+     ~100 k pixels, 2-3 ms toutes les 2.5 s — le chart, lui, ne paie qu'un drawImage) */
+  off.width = vis.length; off.height = rows;
+  const img = octx.createImageData(vis.length, rows), px = img.data;
   for (let i = 0; i < vis.length; i++) {
-    const s = vis[i], x = left + i*cw;
-    for (const [k, v] of s.bins) {
+    for (const [k, v] of vis[i].bins) {
       if (k < kLo || k > kHi) continue;
-      const q = Math.pow(v/max, .35);
-      if (q < thr) continue;
-      if (q >= .70)      ctx.fillStyle = rgba(GOLD_B, .25 + .45*q);
-      else if (q >= .30) ctx.fillStyle = rgba(GOLD,   .12 + .34*q);
-      else               ctx.fillStyle = rgba(GOLD,   .05 + .16*q);
-      ctx.fillRect(x, Y((k + 1)*binSize), cw + .5, ch + .5);
+      const q = Math.pow(v/max, .35);                     /* log-doux : un méga-mur n'éteint pas la brume */
+      const li = Math.min(255, Math.round(q*255))*4;
+      const o = ((kHi - k)*vis.length + i)*4;
+      px[o] = LUT[li]; px[o+1] = LUT[li+1]; px[o+2] = LUT[li+2]; px[o+3] = LUT[li+3];
     }
   }
+  octx.putImageData(img, 0, 0);
+  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(off, 0, 0, vis.length, rows, left, top, plotW, plotH);
 
   /* échelle de prix réelle */
   ctx.fillStyle = '#7d795f'; ctx.font = '10px Consolas, monospace';
@@ -199,13 +212,17 @@ function render() {
   ctx.strokeStyle = rgba(BULL, .9); ctx.lineWidth = 1.4;
   ctx.shadowColor = BULL; ctx.shadowBlur = 5;
   ctx.beginPath();
+  const cw = plotW / vis.length;
   for (let i = 0; i < vis.length; i++) {
     const x = left + (i + .5)*cw, y = Y(vis[i].mid);
     i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
   }
-  ctx.stroke(); ctx.shadowBlur = 0;
-  const lastY = Y(vis[vis.length-1].mid);
-  ctx.fillStyle = BULL; ctx.font = '700 10px Consolas, monospace';
+  ctx.stroke();
+  const lastX = left + (vis.length - .5)*cw, lastY = Y(vis[vis.length-1].mid);
+  ctx.fillStyle = BULL;
+  ctx.beginPath(); ctx.arc(lastX, lastY, 2.4, 0, Math.PI*2); ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.font = '700 10px Consolas, monospace';
   ctx.fillText(vis[vis.length-1].mid.toFixed(priceDec), right + 6, lastY + 3);
 }
 
