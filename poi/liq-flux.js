@@ -98,16 +98,19 @@
     orb.pulse = Math.random() * 6.28;
     orb.amp = 2 + Math.random() * 4;
     // PERF : les orbes d'AMBIANCE (marche entier) n'ont pas de queue — seuls
-    // les meteores du symbole affiche paient le rendu riche.
-    orb.maxTrail = dim ? 0 : Math.round(12 + r * 1.2);
+    // les meteores du symbole affiche paient le rendu riche. Queue raccourcie
+    // (perf 2026-07-24) : ~40 segments/meteore au max devenaient le premier
+    // poste de strokes sous cascade.
+    orb.maxTrail = dim ? 0 : Math.round(8 + r * 0.7);
 
     orbs.push(orb);
 
     if (!dim) {
       // particules satellites pour les grosses liquidations
       if (usd > 5e6) {
-        const count = Math.min(14, Math.round(usd / 5e6));
+        const count = Math.min(8, Math.round(usd / 5e6));   // perf : 14 -> 8, et cap global respecte
         for (let i = 0; i < count; i++) {
+          if (particles.length >= 90) break;   // P4 (audit 8) : plafond PROPRE, plus de ~700 en pire cas
           const p = particlePool.pop() || {};
           p.x = orb.x;
           p.y = orb.y;
@@ -156,7 +159,12 @@
   // seule le plafond et supprimait les meteores du symbole AFFICHE au moment
   // le plus interessant. Quotas separes + un meteore evince la plus vieille
   // orbe d'ambiance quand le canal est plein.
-  const ORB_CAP = 50, DIM_CAP = 35;
+  // Resserres (perf 2026-07-24, demande Meddy : les cascades faisaient lagger
+  // la navigation du chart) : 28/14 — la cascade reste vivante, le pire cas
+  // coute ~2x moins, et l'ambiance est en plus cadencee (1/250 ms, cf.
+  // onMessage) comme les blips du sonar.
+  const ORB_CAP = 28, DIM_CAP = 14;
+  let lastDimSpawnAt = 0;
   function dimCount() { let n = 0; for (const o of orbs) if (o.dim) n++; return n; }
   function evictOldestDim() {
     for (let i = 0; i < orbs.length; i++) {
@@ -198,6 +206,9 @@
     // tamisees, sans ping ni onde, hors compteurs/journal (qui restent la
     // verite du symbole affiche). Le canal vit au rythme du marche entier.
     if (panelShown() && orbs.length < ORB_CAP && dimCount() < DIM_CAP) {   // M6 : quota propre a l'ambiance
+      const nowMs = performance.now();
+      if (nowMs - lastDimSpawnAt < 250) return;   // cadence (perf) : la cascade tous-marches ne mitraille plus
+      lastDimSpawnAt = nowMs;
       createOrb(side, usd, true);   // dims en px CSS dans createOrb (audit retina conserve)
     }
   }
@@ -300,7 +311,7 @@
             const big = a.baseR >= b.baseR ? a : b;
             const small = big === a ? b : a;
             big.baseR = Math.min(44, Math.cbrt(big.baseR ** 3 + small.baseR ** 3));
-            big.maxTrail = Math.round(12 + big.baseR * 1.2);
+            big.maxTrail = Math.round(8 + big.baseR * 0.7);
             small.dying = true;
             continue;
           }
@@ -316,7 +327,7 @@
           // tempete a 60 fps).
           const rvx = b.vx - a.vx, rvy = b.vy - a.vy;
           const impact = Math.sqrt(rvx * rvx + rvy * rvy);
-          if (impact > 2.2 && d < rs * 0.55 && particles.length < 200 &&
+          if (impact > 2.2 && d < rs * 0.55 && particles.length < 90 &&
               now - (a.sparkAt || 0) > 350 && now - (b.sparkAt || 0) > 350) {
             a.sparkAt = now; b.sparkAt = now;
             const cx2 = (a.x + b.x) / 2, cy2 = (a.y + b.y) / 2;
@@ -403,10 +414,33 @@
         const c = COLOR[o.side];
         const alpha = o.life * o.fade;
 
-        /* ----- queue de comete ----- */
-        for (let t = o.trail.length - 1; t > 0; t--) {
+        /* PERF 2026-07-24 (demande Meddy : cascades = lag de navigation) :
+           chaque orbe payait 3-4 passes shadowBlur (rasterisation CPU) a
+           60 fps. Desormais : AMBIANCE 100 % a plat (a 2-4 px le flou est
+           invisible), METEORE = UNE seule passe floutee (le corps) — le halo
+           externe devient un disque alpha sans ombre, visuellement equivalent
+           en composition "lighter". Sous charge (>18 orbes), queues un
+           segment sur deux et flou reduit. */
+        if (o.dim) {
+          fluxCx.shadowBlur = 0;
+          fluxCx.fillStyle = rgba(c, alpha * 0.10);
+          fluxCx.beginPath();
+          fluxCx.arc(o.x, o.y, radius * 1.6, 0, Math.PI * 2);
+          fluxCx.fill();
+          fluxCx.fillStyle = rgba(c, alpha * 0.38);
+          fluxCx.beginPath();
+          fluxCx.arc(o.x, o.y, radius, 0, Math.PI * 2);
+          fluxCx.fill();
+          continue;
+        }
+
+        const heavy = orbs.length > 18;
+
+        /* ----- queue de comete (degradee sous charge) ----- */
+        const step = heavy ? 2 : 1;
+        for (let t = o.trail.length - 1; t > 0; t -= step) {
           const p1 = o.trail[t];
-          const p2 = o.trail[t - 1];
+          const p2 = o.trail[Math.max(0, t - step)];
           const k = 1 - t / o.trail.length;
           const a = alpha * k * k * 0.45;
           fluxCx.strokeStyle = rgba(c, a);
@@ -417,53 +451,43 @@
           fluxCx.stroke();
         }
 
-        /* ----- halo externe ----- */
-        fluxCx.shadowColor = rgba(c, 1);
-        fluxCx.shadowBlur = radius * 2.2;
+        /* ----- halo externe A PLAT (l'ex-blur 2.2r etait le poste n.1) ----- */
+        fluxCx.shadowBlur = 0;
         fluxCx.fillStyle = rgba(c, alpha * 0.12);
         fluxCx.beginPath();
         fluxCx.arc(o.x, o.y, radius * 1.8, 0, Math.PI * 2);
         fluxCx.fill();
 
-        /* ----- halo moyen ----- */
-        fluxCx.shadowBlur = radius * 1.3;
-        fluxCx.fillStyle = rgba(c, alpha * 0.22);
-        fluxCx.beginPath();
-        fluxCx.arc(o.x, o.y, radius * 1.2, 0, Math.PI * 2);
-        fluxCx.fill();
-
-        /* ----- corps ----- */
-        fluxCx.shadowBlur = radius * 0.9;
-        fluxCx.fillStyle = rgba(c, alpha * (o.dim ? 0.35 : 0.55));
+        /* ----- corps : SEULE passe floutee ----- */
+        fluxCx.shadowColor = rgba(c, 1);
+        fluxCx.shadowBlur = radius * (heavy ? 0.6 : 1.1);
+        fluxCx.fillStyle = rgba(c, alpha * 0.6);
         fluxCx.beginPath();
         fluxCx.arc(o.x, o.y, radius, 0, Math.PI * 2);
         fluxCx.fill();
 
-        if (!o.dim) {
-          /* ----- coeur ----- */
-          fluxCx.shadowBlur = radius * 0.5;
-          fluxCx.fillStyle = rgba(tint(c, 0.55), alpha * 0.9);
-          fluxCx.beginPath();
-          fluxCx.arc(o.x, o.y, radius * 0.45, 0, Math.PI * 2);
-          fluxCx.fill();
+        /* ----- coeur (sans ombre) ----- */
+        fluxCx.shadowBlur = 0;
+        fluxCx.fillStyle = rgba(tint(c, 0.55), alpha * 0.9);
+        fluxCx.beginPath();
+        fluxCx.arc(o.x, o.y, radius * 0.45, 0, Math.PI * 2);
+        fluxCx.fill();
 
-          /* ----- reflet ----- */
-          fluxCx.shadowBlur = 0;
-          fluxCx.fillStyle = `rgba(255,255,255,${0.75 * alpha})`;
-          fluxCx.beginPath();
-          fluxCx.arc(
-            o.x - radius * 0.18,
-            o.y - radius * 0.18,
-            Math.max(1, radius * 0.14),
-            0,
-            Math.PI * 2
-          );
-          fluxCx.fill();
-        }
+        /* ----- reflet ----- */
+        fluxCx.fillStyle = `rgba(255,255,255,${0.75 * alpha})`;
+        fluxCx.beginPath();
+        fluxCx.arc(
+          o.x - radius * 0.18,
+          o.y - radius * 0.18,
+          Math.max(1, radius * 0.14),
+          0,
+          Math.PI * 2
+        );
+        fluxCx.fill();
       }
 
       /* ---------- particules satellites (meme etat canvas) ---------- */
-      fluxCx.shadowBlur = 6;
+      fluxCx.shadowBlur = 0;   // perf : le blur par particule (jusqu'a 90/frame) ne se voit pas a cette taille
       for (let i = particles.length - 1; i >= 0; i--) {
         const p = particles[i];
 
@@ -480,8 +504,7 @@
         }
 
         const c = COLOR[p.side];
-        fluxCx.shadowColor = rgba(c, 1);
-        fluxCx.fillStyle = rgba(c, p.life * 0.5);
+        fluxCx.fillStyle = rgba(c, p.life * 0.6);
         fluxCx.beginPath();
         fluxCx.arc(p.x, p.y, 1.8 + p.life * 2, 0, Math.PI * 2);
         fluxCx.fill();
