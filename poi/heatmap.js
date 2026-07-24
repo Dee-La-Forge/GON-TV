@@ -176,7 +176,7 @@
     cx.textAlign = "right"; cx.font = "700 9px Consolas, monospace";
     for (const it of items) {
       const y = Math.max(it.y, prevY + 13); prevY = y;
-      if (y < 8 || y > cv.height - axH - 8) continue;
+      if (y < 8 || y > paneHeight() - 8) continue;
       const tw = cx.measureText(it.txt).width;
       cx.fillStyle = "rgba(6,6,4,.78)"; cx.fillRect(lx - tw - 6, y - 6.5, tw + 10, 13);
       if (it.fled) {
@@ -350,11 +350,18 @@
     if (repaintQueued) return;
     repaintQueued = requestAnimationFrame(() => { repaintQueued = 0; repaint(); });
   }
+  function paneHeight() {
+    /* hauteur du pane PRINCIPAL (le bas du canvas, c'est le pane CVD !) */
+    try { const s = gon.chart.paneSize(); if (s && s.height > 0) return s.height; } catch (_) {}
+    return cv.height - axH;
+  }
   function yMap() {
-    const h = cv.height - axH;
-    const a = gon.series.coordinateToPrice(0), b = gon.series.coordinateToPrice(h);
+    /* 2 ancres DANS le pane principal — coordinateToPrice(bas du canvas)
+       tombait dans le pane CVD et renvoyait null : rien ne se peignait */
+    const a = gon.series.coordinateToPrice(0), b = gon.series.coordinateToPrice(100);
     if (!Number.isFinite(a) || !Number.isFinite(b) || a === b) return null;
-    return p => (a - p)/(a - b)*h;
+    const slope = (b - a)/100;
+    return p => (p - a)/slope;
   }
   function xMap() {
     const bars = gon.dataNow();
@@ -385,7 +392,7 @@
     const Y = yMap(), X = xMap();
     if (!Y || !X) return;
     const { kLo, kHi, med, rows, n, vis } = P;
-    const plotW = cv.width - axW, plotH = cv.height - axH;
+    const plotW = cv.width - axW, plotH = paneHeight();
     const colW = Math.max(.5, X(vis[0].t + EVERY*(degraded ? 2 : 1)) - X(vis[0].t));
     const xA = X(vis[0].t) - colW/2, xB = X(vis[n-1].t) + colW/2;
     const yT = Y((kHi + 1)*binSize), yB2 = Y(kLo*binSize);
@@ -566,7 +573,7 @@
     if (e.target && e.target.closest && e.target.closest("[data-tip],[title]")) { hideTip(); return; }
     const rect = cv.getBoundingClientRect();
     const mx = e.clientX - rect.left, my = e.clientY - rect.top;
-    if (mx < 0 || my < 0 || mx > cv.width - axW || my > cv.height - axH) { hideTip(); return; }
+    if (mx < 0 || my < 0 || mx > cv.width - axW || my > paneHeight()) { hideTip(); return; }
     const { kLo, kHi, med, vis } = P;
     const Y = yMap(), X = xMap();
     if (!Y || !X) { hideTip(); return; }
