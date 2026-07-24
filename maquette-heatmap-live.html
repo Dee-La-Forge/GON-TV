@@ -197,7 +197,13 @@ function render() {
   const Y = p => top + (pHi - p)/(pHi - pLo)*plotH;
   for (const s of vis) for (const v of s.bins.values()) if (v > max) max = v;
   if (!max) return;
-  const qOf = v => Math.pow(v/max, .35);                  /* log-doux : un méga-mur n'éteint pas le reste */
+  /* référence = MÉDIANE du carnet : l'ordinaire reste sombre, seul l'anormal luit
+     (q atteint 1 à 48× la médiane ; échelle log — un méga-mur sature sans éteindre le reste) */
+  const vals = []; let cnt = 0;
+  for (const s of vis) for (const v of s.bins.values()) if ((cnt++ & 7) === 0) vals.push(v);
+  vals.sort((a, b) => a - b);
+  const med = vals[vals.length >> 1] || 1;
+  const qOf = v => { const r = v/med; return r <= 1 ? 0 : Math.min(1, Math.log(r)/Math.log(48)); };
 
   /* ---- mini-image 1 px/sonde × 1 px/palier (en prod : une seule colonne ajoutée/sonde) ---- */
   off.width = vis.length; off.height = rows;
