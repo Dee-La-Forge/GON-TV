@@ -25,6 +25,10 @@ rem archives de bougies SECONDES (28 symboles, 7 jours glissants) : navigation
 rem profonde des TF secondes sans un seul poids Binance cote client
 call :step "sec-bars ALL" node gen-sec-archive.js ALL 7
 
+rem PUBLICATION : commit + push des donnees regenerees vers GitHub (Pages
+rem s'auto-alimente) — petits lots + reessais (liaison montante faible)
+call :step "publish" node publish-daily.js
+
 echo [%date% %time%] ===== fin (worst=%WORST%) ===== >> "%LOG%"
 exit /b %WORST%
 
