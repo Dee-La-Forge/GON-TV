@@ -99,7 +99,7 @@
     const isCur = sym === curSymbol;
     if (isCur) {
       addBlip(side, n, false);
-      journal(side, n, false);
+      journal(side, n, false, price);
       // MINI-ECHO : print isole >= P99.99 (~1/h) — petit anneau discret sur
       // la bougie, sans sillage, sans embrasement, sans ping. La pleine onde
       // de choc reste reservee aux bursts.
@@ -139,7 +139,7 @@
       }
     }
     addBlip(side, usd * 4, false, true);   // silent : le burst a son propre ping grave
-    journal(side, usd, true);
+    journal(side, usd, true, price);
   }
 
   /* ---------- amorcage REST des seuils (demarrage a froid) ---------- */
@@ -216,18 +216,26 @@
     if (blips.length > 90) blips.shift();
   }
 
-  function journal(side, usd, big) {
+  function journal(side, usd, big, price) {
     if (!journalEl) return;
+    const cap = journalEl.querySelector(".gonWhCap");
+    if (cap) cap.style.display = "block";   // l'intitulé apparaît avec le premier print
+    const list = journalEl.querySelector("#gonWhEvs") || journalEl;
     const hue = side === "buy" ? BUY : SELL;
+    // prix d'exécution (demande Meddy : rendre l'écho lisible d'un coup d'œil)
+    const pxStr = price > 0 ? (Math.abs(price) < 1
+      ? price.toLocaleString("en-US", { maximumSignificantDigits: 4 })
+      : price.toLocaleString("en-US", { maximumFractionDigits: 2 })) : "";
     const row = document.createElement("div");
     row.className = "gonWhEv";
     row.innerHTML = `<i style="background:${hue}; box-shadow:0 0 6px ${hue}"></i>` +
       `<span style="color:${hue}; font-weight:600">${big ? "🐋 " : ""}${(usd / 1e6).toFixed(2)}M</span>` +
       `<span>${side === "buy" ? "ACHAT" : "VENTE"}</span>` +
+      (pxStr ? `<span class="px">@ ${pxStr}</span>` : "") +
       `<span style="margin-left:auto; color:#6e6a58; font-size:9px">${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>`;   // heure LOCALE (audit)
-    journalEl.prepend(row);
-    while (journalEl.children.length > 4) journalEl.lastChild.remove();
-    let a = 1; for (const c of journalEl.children) { c.style.opacity = a; a *= 0.68; }
+    list.prepend(row);
+    while (list.children.length > 4) list.lastChild.remove();
+    let a = 1; for (const c of list.children) { c.style.opacity = a; a *= 0.68; }
   }
 
   function drawWaves(now, plotW) {
@@ -436,10 +444,16 @@
          forme une colonne cockpit juste en dessous. Le logo reste intact. */
       #gonWhaleRadar { position:absolute; left:5%; top:81px; width:144px; height:144px;
         pointer-events:auto; cursor:pointer; z-index:7; }
-      #gonWhaleLog { position:absolute; left:calc(5% + 7px); top:232px; width:200px; z-index:7;
+      #gonWhaleLog { position:absolute; left:calc(5% + 7px); top:232px; width:216px; z-index:7;
         pointer-events:none; font:11px "Segoe UI", sans-serif; }
+      /* intitulé du journal (demande Meddy : on ne savait pas à quoi
+         correspondaient les échos) — apparaît avec le premier print,
+         survolable pour la bulle d'aide */
+      .gonWhCap { display:none; font-size:7px; letter-spacing:2.5px; color:#6e6a58;
+        margin-bottom:3px; pointer-events:auto; }
       .gonWhEv { display:flex; align-items:center; gap:6px; padding:2px 0; color:#c9c4b4; }
       .gonWhEv i { width:5px; height:5px; border-radius:50%; flex:none; }
+      .gonWhEv .px { color:#8d8154; font-size:9px; font-variant-numeric:tabular-nums; }
       #gonWhaleBtn { background:none; border:1px solid #232635; color:#d9b64d;
         font-size:13px; line-height:1; padding:2px 7px; cursor:pointer; opacity:.5; }
       #gonWhaleBtn:hover { border-color:#d9b64d; }
@@ -454,6 +468,7 @@
     radarCv.width = 288; radarCv.height = 288;
     radarCx = radarCv.getContext("2d");
     journalEl = document.createElement("div"); journalEl.id = "gonWhaleLog";
+    journalEl.innerHTML = `<div class="gonWhCap" title="Prints de baleines : trades géants du symbole affiché (top 0,1 % du notionnel, seuil glissant recalibré en continu). 🐋 = burst (3+ prints du même sens en 5 s — onde de choc sur la bougie). Ligne : montant · sens · prix · heure. Le petit anneau discret sur une bougie = print isolé ≥ P99.99.">🐋 PRINTS BALEINES</div><div id="gonWhEvs"></div>`;
     gon.mount.appendChild(cv); gon.mount.appendChild(radarCv); gon.mount.appendChild(journalEl);
 
     try { muted = localStorage.getItem(SND_KEY) === "0"; } catch (_) {}
