@@ -106,25 +106,26 @@
     color: #060604; background: linear-gradient(180deg, var(--gold-b), var(--gold));
     border-color: var(--gold-d); box-shadow: 0 0 14px rgba(217,182,77,.45);
   }
+  /* charte COMMUNE des bulles d'aide (revue : une seule source — tout réglage
+     du cartouche vaut pour les tips d'outils ET la bulle globale) */
+  .tool::after, #uiTip {
+    background: rgba(10,9,6,.97); border: 1px solid var(--gold-d); color: var(--gold-b);
+    padding: 4px 10px; border-radius: 4px; font-size: 10.5px;
+    opacity: 0; pointer-events: none;
+    box-shadow: 0 4px 18px rgba(0,0,0,.75), 0 0 12px rgba(217,182,77,.10);
+  }
   .tool::after {
     content: attr(data-tip); position: absolute; left: 47px; top: 50%;
     transform: translateY(-50%) translateX(-5px);
-    background: rgba(10,9,6,.97); border: 1px solid var(--gold-d); color: var(--gold-b);
-    padding: 4px 10px; border-radius: 4px; font-size: 10.5px; letter-spacing: 1.2px;
-    text-transform: uppercase; white-space: nowrap;
-    opacity: 0; pointer-events: none; transition: opacity .15s, transform .15s; z-index: 60;
-    box-shadow: 0 4px 18px rgba(0,0,0,.75), 0 0 12px rgba(217,182,77,.10);
+    letter-spacing: 1.2px; text-transform: uppercase; white-space: nowrap;
+    transition: opacity .15s, transform .15s; z-index: 60;
   }
   .tool:hover::after { opacity: 1; transform: translateY(-50%) translateX(0); transition-delay: .3s; }
-  /* bulle d'aide GLOBALE (demande Meddy) : même charte que les tips des outils,
-     casse normale (phrases), multi-lignes possible (titles des modules) */
+  /* bulle GLOBALE (demande Meddy) : casse normale (phrases), multi-lignes */
   #uiTip {
     position: fixed; z-index: 80;
-    background: rgba(10,9,6,.97); border: 1px solid var(--gold-d); color: var(--gold-b);
-    padding: 4px 10px; border-radius: 4px; font-size: 10.5px; letter-spacing: .4px;
-    max-width: 280px; white-space: pre-line; line-height: 1.45;
-    opacity: 0; pointer-events: none; transition: opacity .15s;
-    box-shadow: 0 4px 18px rgba(0,0,0,.75), 0 0 12px rgba(217,182,77,.10);
+    letter-spacing: .4px; max-width: 280px; white-space: pre-line; line-height: 1.45;
+    transition: opacity .15s;
   }
   #uiTip.on { opacity: 1; }
   #eyeBtn .eye-off { display: none; }
@@ -3279,15 +3280,21 @@ document.addEventListener('mouseover', e => {
   hideUiTip();
   if (el.classList && el.classList.contains('tool')) return;   // tip CSS dédié de la barre d'outils
   const t = el.getAttribute('title');
-  if (t) { el.dataset.tip = t; el.removeAttribute('title'); }
+  // revue : le title retiré était le seul NOM ACCESSIBLE de l'élément — on le
+  // miroite en aria-label (même pratique que les outils, l.3262)
+  if (t) { el.dataset.tip = t; el.removeAttribute('title'); if (!el.hasAttribute('aria-label')) el.setAttribute('aria-label', t); }
   const txt = el.dataset.tip;
   if (!txt) return;
   uiTipFor = el;
   uiTipTimer = setTimeout(() => {
+    // revue : cible disparue/masquée pendant le délai (Suppr sur un tracé, la
+    // propbar se ferme sans mouseout) -> rect à zéro, bulle épinglée en (6,8).
+    const r = el.getBoundingClientRect();
+    if (!el.isConnected || (!r.width && !r.height)) { hideUiTip(); return; }
     uiTip.textContent = txt;
     uiTip.style.left = '0px'; uiTip.style.top = '0px';   // reset avant mesure
     uiTip.classList.add('on');
-    const r = el.getBoundingClientRect(), w = uiTip.offsetWidth, h = uiTip.offsetHeight;
+    const w = uiTip.offsetWidth, h = uiTip.offsetHeight;
     let x = Math.max(6, Math.min(innerWidth - w - 6, r.left + r.width / 2 - w / 2));
     let y = r.bottom + 8;
     if (y + h > innerHeight - 6) y = r.top - h - 8;   // pas de place dessous : au-dessus
@@ -3299,6 +3306,7 @@ document.addEventListener('mouseout', e => {
 }, true);
 document.addEventListener('mousedown', hideUiTip, true);
 document.addEventListener('wheel', hideUiTip, { capture: true, passive: true });
+document.addEventListener('keydown', hideUiTip, true);   // revue : Suppr peut retirer la cible sans aucun mouseout
 $('propKind').setAttribute('aria-label', 'Type de rectangle');
 $('propTf').setAttribute('aria-label', 'TF de la zone');
 $('propWidth').setAttribute('aria-label', 'Épaisseur du trait');
@@ -3489,6 +3497,6 @@ if ('serviceWorker' in navigator && location.hostname.endsWith('github.io')) nav
 <script src="poi/poi-feature.js?v=47"></script>
 <script src="poi/liq-flux.js?v=44"></script>
 <script src="poi/whale-sonar.js?v=32"></script>
-<script src="poi/confluence.js?v=35"></script>
+<script src="poi/confluence.js?v=36"></script>
 </body>
 </html>

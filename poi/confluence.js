@@ -607,7 +607,7 @@
     document.head.appendChild(css);
 
     panel = document.createElement("div"); panel.id = "gonConflPanel";
-    panel.innerHTML = `<div class="hd" title="Profil de volume des 2 dernieres heures : POC (prix le plus trade), VAH/VAL (zone de valeur 70 %), et murs du carnet d'ordres en direct">CARNET &nbsp;&amp;&nbsp; PROFIL</div>`;
+    panel.innerHTML = `<div class="hd" title="Profil de volume de la fenetre AFFICHEE (s'adapte au zoom) : POC (prix le plus trade), VAH/VAL (zone de valeur 70 %), et murs du carnet d'ordres en direct">CARNET &nbsp;&amp;&nbsp; PROFIL</div>`;
     cvPanel = document.createElement("canvas"); cvPanel.id = "gonConflCv";
     panel.appendChild(cvPanel); cxPanel = cvPanel.getContext("2d");
     // colonne entre le chart et le panneau FLUX (soeur de flex)
