@@ -561,18 +561,26 @@ function persistBars(lastGasp) {
   // Tiroir profond IndexedDB en vie courante ; pagehide (lastGasp) reste sur le
   // localStorage SYNCHRONE — une écriture IDB peut être tuée avec la page.
   if (idb && !lastGasp) {
-    if (isSecTf() && candles.length > IDB_BARS_CAP) return;   // secondes tronquées : curseur incohérent, on ne persiste que si tout tient
+    // secondes > cap (zéro chargement 2026-07-24) : on persiste la QUEUE avec
+    // fi NEUTRALISÉ (le curseur arrière ne décrirait plus b[0]) — avant, la
+    // session ne sauvait RIEN et l'historique péniblement construit était
+    // perdu. fetchOlderSec re-seede le curseur PAR TEMPS au premier scroll.
+    const secTrunc = isSecTf() && candles.length > IDB_BARS_CAP;
     const dKey = symbol + '|' + tf, lsKey = barsKey(symbol, tf);
     const rec = { v: BARS_SCHEMA, t: Date.now(), atStart: oldestDone && candles.length <= IDB_BARS_CAP,
-      fi: firstTradeId, lm: lastTradeMs, la: lastAggId, b: candles.slice(-IDB_BARS_CAP) };
+      fi: secTrunc ? null : firstTradeId, lm: lastTradeMs, la: lastAggId, b: candles.slice(-IDB_BARS_CAP) };
     idbPut('bars', dKey, rec).then(ok => {
       if (ok === undefined) {
         // Audit 7 : le repli « persistBarsLS() » relisait les GLOBAUX au moment
         // du callback — le contexte avait déjà changé (cacheBars précède tf=t)
         // → repli mort. On écrit CE snapshot, borné à BARS_CAP pour le LS.
+        // fi neutralisé si la re-troncature LS déplace b[0] (sinon le scroll-back
+        // prependait des bougies d'AVANT l'ancienne tête → trou intérieur).
         try {
           localStorage.setItem(lsKey, JSON.stringify({ ...rec,
-            atStart: rec.atStart && rec.b.length <= BARS_CAP, b: rec.b.slice(-BARS_CAP) }));
+            atStart: rec.atStart && rec.b.length <= BARS_CAP,
+            fi: rec.b.length <= BARS_CAP ? rec.fi : null,
+            b: rec.b.slice(-BARS_CAP) }));
         } catch {}
       } else idbPruneBars(dKey);
     });
@@ -582,11 +590,12 @@ function persistBars(lastGasp) {
 }
 function persistBarsLS() {
   if (!persistable()) return;
-  // secondes tronquées : firstTradeId ne correspondrait plus à candles[0] → on ne persiste que si tout tient
-  if (isSecTf() && candles.length > BARS_CAP) return;
+  // secondes > cap (zéro chargement 2026-07-24) : queue persistée, fi neutralisé
+  // (ne décrirait plus b[0]) — re-seed PAR TEMPS au premier scroll-back.
+  const secTrunc = isSecTf() && candles.length > BARS_CAP;
   const key = barsKey(symbol, tf);
   const atStart = oldestDone && candles.length <= BARS_CAP;   // a-t-on gardé le tout début ?
-  const payload = JSON.stringify({ v: BARS_SCHEMA, t: Date.now(), atStart, fi: firstTradeId, lm: lastTradeMs, la: lastAggId, b: candles.slice(-BARS_CAP) });
+  const payload = JSON.stringify({ v: BARS_SCHEMA, t: Date.now(), atStart, fi: secTrunc ? null : firstTradeId, lm: lastTradeMs, la: lastAggId, b: candles.slice(-BARS_CAP) });
   // écrire le payload D'ABORD, puis committer l'index INCLUANT la clé fraîche : un autre onglet
   // qui lit l'index entre-temps la voit (pas de balayage destructeur en course multi-onglets)
   const commitIdx = () => {
@@ -630,8 +639,11 @@ function validPersisted(o) {   // {b, atStart, fi, lm, la} sain et pas trop pér
   if (!o || o.v !== BARS_SCHEMA || !Array.isArray(o.b) || !o.b.length) return false;
   // secondes : curseur trade indispensable (le poll ne s'amorce pas sans) — refuser un enregistrement sans 'la' valide
   if (isSecTf() && !(typeof o.la === 'number' && o.la > 0)) return false;
-  // trop vieux = trop de trou à combler : rechargement frais (secondes très court, klines borné à fillGap ET à 30 j)
-  const maxAge = isSecTf() ? 90000 : Math.min(18000 * TFSEC[tfDef().src] * 1000, 30 * 86400e3);
+  // klines : trop vieux = trop de trou à combler → rechargement frais (borné à fillGap ET à 30 j).
+  // secondes (zéro chargement 2026-07-24) : 48 h — un cache vieux n'est plus jeté ;
+  // ≤ 90 s le trou se comble vers l'AVANT (fillGapSec), au-delà le présent frais
+  // s'affiche d'abord et bridgeSec RECOUD en arrière vers le préfixe du disque.
+  const maxAge = isSecTf() ? 48 * 3600e3 : Math.min(18000 * TFSEC[tfDef().src] * 1000, 30 * 86400e3);
   const age = Date.now() - o.t;
   if (typeof o.t !== 'number' || age < 0 || age > maxAge) return false;   // age < 0 : horloge reculée → rejeter
   // Trous INTÉRIEURS (revue) : une fusion IDB+LS sans recouvrement pouvait
@@ -947,6 +959,8 @@ function tradesToBars(trades) {   // TF secondes : seaux construits depuis les a
 let lastTradeMs = 0;     // horodatage du dernier trade vu (TF secondes)
 let lastAggId = 0;       // curseur AVANT par id de trade (startTime en ms SAUTE des trades intra-milliseconde)
 let firstTradeId = null; // curseur ARRIÈRE (pagination fromId du scroll-back secondes)
+let secBridgePlan = null; // recouture arrière du cache secondes vieux : {prefix, la, fi, atStart} — consommé par bridgeSec
+let secBridgeLive = null; // plan ACTIF pendant bridgeSec : le scroll-back s'arrête à la couture (jamais deux reconstructions du même seau)
 const OLDEST = Symbol('oldest');   // genèse atteinte — Symbol, pas une string truthy avec .length
 /* pages d'aggTrades en ARRIÈRE (fromId), parallèles, dédupliquées, triées — partagé load/scroll-back */
 async function fetchTradesBack(firstId, pages) {
@@ -1036,17 +1050,112 @@ async function deepenSec(seq) {   // garde seq : une boucle périmée (TF/symbol
     } catch { break; } finally { loadingOld = false; }
   }
 }
+/* RECOUTURE ARRIÈRE du cache secondes (zéro chargement 2026-07-24) : le cache
+   disque était plus vieux que ce que fillGapSec comble vers l'AVANT (20 pages).
+   Le présent frais est déjà affiché ; on pagine en ARRIÈRE depuis la tête
+   fraîche jusqu'à rejoindre le dernier trade du cache (plan.la), puis jonction :
+   préfixe disque + trou comblé + frais — l'historique des sessions précédentes
+   est préservé. Budget borné : 16 lots × 10 pages (poids 3200) pacés 6 s ≈
+   moitié du budget IP le temps de la recouture (~90 s max). Trou trop grand
+   (BTC après des heures) : on garde le récupéré, le préfixe est abandonné
+   (comportement d'avant, dégradation propre). */
+async function bridgeSec(seq, plan) {
+  const junction = () => {   // colle préfixe disque + [trou déjà prépendu] + frais
+    const pre = plan.prefix.slice();
+    const head = candles[0], pl = pre[pre.length - 1];
+    // Fusion COMPLÉMENTAIRE exacte : tout chemin qui atteint la couture filtre
+    // t.a > la (le bridge, ET le scroll-back via secBridgeLive) — le seau
+    // frontière côté candles ne contient QUE les trades après la, le préfixe
+    // n'a QUE ceux d'avant : la somme est le seau entier, sans double compte.
+    if (pl && head && pl.time === head.time) {
+      head.open = pl.open;
+      if (pl.high > head.high) head.high = pl.high;
+      if (pl.low < head.low) head.low = pl.low;
+      head.volume += pl.volume; pre.pop();
+    }
+    while (pre.length && head && pre[pre.length - 1].time >= head.time) pre.pop();   // sanité : jamais de chevauchement
+    if (!pre.length) return;
+    const vr = ts().getVisibleRange();
+    candles = pre.concat(candles);
+    firstTradeId = plan.fi ?? null;   // null (persist tronqué) : re-seed PAR TEMPS au prochain scroll-back
+    oldestDone = !!plan.atStart;
+    if (candles.length > MAX_BARS) { candles = candles.slice(-MAX_BARS); firstTradeId = null; oldestDone = false; }
+    setAllDeferInd(candles);
+    if (vr) try { ts().setVisibleRange(vr); } catch {}
+    persistBars();
+  };
+  secBridgeLive = plan;   // le scroll-back se clampe à la couture tant que la recouture vit
+  try {
+  for (let lot = 0; lot < 16; lot++) {
+    if (lot > 0) await new Promise(r => setTimeout(r, 6000));
+    if (seq !== loadSeq || replay) return;
+    if (loadingOld) continue;                    // verrou tenu (scroll-back en vol) : on retente au lot suivant
+    if (!firstTradeId || firstTradeId <= 1) return;
+    if (candles.length >= MAX_BARS) return;
+    loadingOld = true;
+    try {
+      if (firstTradeId <= plan.la + 1) { junction(); return; }   // couture atteinte (par le bridge ou le scroll-back clampé)
+      const { trades } = await fetchTradesBack(firstTradeId, 10);
+      if (seq !== loadSeq || replay) return;
+      if (!trades.length) return;                // erreur/genèse : abandon silencieux du préfixe
+      const fresh = trades.filter(t => t.a > plan.la);   // ids ≤ la : déjà dans le préfixe disque
+      const joined = fresh.length < trades.length || trades[0].a <= plan.la + 1;
+      if (fresh.length) {
+        firstTradeId = fresh[0].a;
+        const older = tradesToBars(fresh);
+        const head = candles[0], lastNew = older[older.length - 1];
+        if (lastNew && head && lastNew.time === head.time) {   // fusion du seau frontière
+          head.open = lastNew.open;
+          if (lastNew.high > head.high) head.high = lastNew.high;
+          if (lastNew.low < head.low) head.low = lastNew.low;
+          head.volume += lastNew.volume; older.pop();
+        }
+        if (older.length) {
+          const vr = ts().getVisibleRange();
+          candles = older.concat(candles);
+          if (!joined) { setAllDeferInd(candles); if (vr) try { ts().setVisibleRange(vr); } catch {} }
+        }
+      }
+      if (joined) { junction(); return; }
+    } catch { return; } finally { loadingOld = false; }
+  }
+  } finally { secBridgeLive = null; }   // budget épuisé ou sortie : le scroll-back reprend son régime normal
+}
 /* scroll-back des TF secondes : 10 pages de trades en arrière par déclenchement
    (fluidité 2026-07-24 : 5 pages = 15-50 s de BTC par aller-retour — 2× moins
    d'allers-retours ET 2× moins de setData par bougie obtenue à poids constant).
    'end' = genèse atteinte ; null = réessayer plus tard (erreur/contexte) */
 async function fetchOlderSec() {
-  const seq = loadSeq, firstId = firstTradeId;
-  if (firstId == null || firstId <= 1) return OLDEST;
-  const { trades, healthy } = await fetchTradesBack(firstId, 10);
+  const seq = loadSeq;
+  let firstId = firstTradeId, dropFrom = Infinity;
+  if (firstId == null) {
+    // Curseur arrière PERDU (cap rasé / persist tronqué / jonction sans fi) —
+    // avant : scroll gelé DÉFINITIVEMENT (OLDEST menteur). Re-seed PAR TEMPS :
+    // 1er trade au début du seau de tête ; les trades de ce seau (déjà comptés
+    // dans candles[0]) sont écartés du résultat pour ne rien compter deux fois.
+    if (!candles.length) return OLDEST;
+    const t0 = candles[0].time * 1000;
+    const r = await fetchJson(`${AGGT}?symbol=${symbol}&startTime=${t0}&limit=1000`, 12000);
+    if (seq !== loadSeq || !ctxFresh()) return null;
+    if (!Array.isArray(r) || !r.length) return null;   // erreur : on retentera
+    firstId = r[0].a;
+    firstTradeId = firstId; dropFrom = t0;
+  }
+  if (firstId <= 1) return OLDEST;
+  if (secBridgeLive && firstId <= secBridgeLive.la + 1) return null;   // couture atteinte : la jonction appartient au bridge (lot suivant ≤ 6 s)
+  let { trades, healthy } = await fetchTradesBack(firstId, 10);
   if (seq !== loadSeq || !ctxFresh()) return null;
   if (!trades.length) return healthy ? OLDEST : null;   // vide + pages saines = genèse réelle
-  firstTradeId = trades[0].a;
+  // CLAMP à la couture (bridge actif) : les seaux ≤ la vivent déjà dans le
+  // préfixe disque — les reconstruire ici créerait un double compte à la
+  // jonction. On filtre t.a > la et on pose le curseur SUR la couture : le
+  // prochain lot du bridge déclenche la jonction (fusion complémentaire).
+  if (secBridgeLive && trades[0].a <= secBridgeLive.la) {
+    firstTradeId = secBridgeLive.la;
+    trades = trades.filter(t => t.a > secBridgeLive.la);
+  } else firstTradeId = trades[0].a;   // AVANT le filtre tête : le curseur avance même si tout le lot est déjà compté
+  if (dropFrom < Infinity) trades = trades.filter(t => t.T < dropFrom);
+  if (!trades.length) return null;   // rien de nouveau dans ce lot : retentera depuis le curseur avancé
   return tradesToBars(trades);
 }
 function applyTrade(price, q, tSec) {   // un trade → le seau courant (créé au besoin)
@@ -1111,7 +1220,7 @@ function applyBar(bar) {
     bucketVols.clear();   // nouveau seau de tête : les volumes source du précédent ne doivent JAMAIS s'y sommer
     if (candles.length > MAX_BARS + 1000) {
       candles = candles.slice(-MAX_BARS);
-      if (isSecTf()) firstTradeId = null;   // curseur de tête rasé : fetchOlderSec renvoie OLDEST (scroll gelé) sans mentir sur oldestDone
+      if (isSecTf()) firstTradeId = null;   // curseur de tête rasé : fetchOlderSec le re-seede PAR TEMPS au prochain scroll-back (plus de gel)
       else oldestDone = false;              // klines : la genèse a quitté la mémoire, le scroll-back doit pouvoir la re-fetch (audit)
       setAll(candles); return;
     }
@@ -1233,6 +1342,7 @@ async function load(keepZoom = false, attempt = 0) {
   stopWs();
   oldestDone = false;
   oldErrUntil = 0;   // la pause d'erreur du scroll-back ne survit pas à un changement de contexte
+  secBridgePlan = null;   // un plan de recouture d'un load supplanté ne survit pas non plus
   hoverT = null;     // nouveau contexte : la légende live reprend la main
   alertPrev = null;  // pas de franchissement fantôme entre l'ancien prix et le nouveau (ex. BTC→DOGE)
   alertBarT = null; alertSeenHi = alertSeenLo = null;   // audit 7 : reset ATOMIQUE — les extrêmes déjà-vus de l'ancien symbole ne survivent plus (l'invariant reposait accidentellement sur alertPrev seul)
@@ -1252,6 +1362,21 @@ async function load(keepZoom = false, attempt = 0) {
       oldestDone = cached.oldestDone;
       firstTradeId = cached.firstTradeId; lastTradeMs = cached.lastTradeMs; lastAggId = cached.lastAggId || 0;
       fromCache = true;
+    } else if (disk && isSecTf() && Date.now() - (disk.lm || disk.t) > 90000) {
+      // Cache secondes VIEUX (zéro chargement 2026-07-24) : le trou dépasse ce
+      // que fillGapSec comble vers l'avant (20 pages). Présent FRAIS affiché
+      // tout de suite (comme un cold start), puis bridgeSec RECOUD en arrière
+      // vers le préfixe du disque — l'historique des sessions passées revient
+      // au lieu d'être jeté (l'ancien maxAge 90 s retéléchargeait TOUT).
+      const tr = await fetchJson(`${AGGT}?symbol=${symbol}&limit=1000`);
+      if (seq !== loadSeq || replay) return;
+      if (Array.isArray(tr) && tr.length) {
+        lastTradeMs = tr[tr.length - 1].T;
+        lastAggId = tr[tr.length - 1].a;
+        firstTradeId = tr[0].a;
+        k = tradesToBars(tr);
+        secBridgePlan = { prefix: disk.b, la: disk.la || 0, fi: disk.fi ?? null, atStart: !!disk.atStart };
+      } else k = tr;
     } else if (disk) {   // RECHARGEMENT : bougies du disque affichées tout de suite, trou comblé ensuite
       k = disk.b;
       oldestDone = !!disk.atStart;
@@ -1326,8 +1451,13 @@ async function load(keepZoom = false, attempt = 0) {
     if (fromCache) { const kick = () => { if (seq !== loadSeq || replay) return;
       if (gapFilling) { setTimeout(kick, 250); return; }
       (isSecTf() ? fillGapSec() : fillGap()); }; setTimeout(kick, 0); }
-    // secondes : la 1re page est affichée ; on approfondit l'historique en tâche de fond (vers la gauche, sans saccade)
-    if (!fromCache && isSecTf()) deepenSec(seq);
+    // secondes : la 1re page est affichée ; en fond, soit on RECOUD vers le
+    // préfixe disque (cache vieux), soit on approfondit (cold start pur)
+    if (!fromCache && isSecTf()) {
+      const plan = secBridgePlan; secBridgePlan = null;
+      if (plan && plan.la > 0 && Array.isArray(plan.prefix) && plan.prefix.length) bridgeSec(seq, plan);
+      else deepenSec(seq);
+    }
   } catch (e) { if (seq === loadSeq) { toast('Réseau : ' + e.message); retry(); } }
   finally { if (seq === loadSeq) { loading = false; document.body.classList.remove('busy'); } }
 }
@@ -2806,7 +2936,10 @@ async function loadOlder() {
       older = await fetchOlderSec();
       if (replay) return;
       if (older === OLDEST) { oldestDone = true; return; }
-      if (older == null) return;                 // erreur/contexte : on retentera au prochain scroll
+      // erreur/contexte : pause courte AVANT re-tentative — l'enchaînement
+      // auto (fluidité 2026-07-24) re-planifie toutes les 200 ms et
+      // martèlerait l'API sur un échec persistant sans cette pause.
+      if (older == null) { oldErrUntil = Date.now() + 3000; return; }
       const head = candles[0], lastNew = older[older.length - 1];
       if (lastNew && head && lastNew.time === head.time) {   // fusion du seau frontière (trades du même seau)
         head.open = lastNew.open;
