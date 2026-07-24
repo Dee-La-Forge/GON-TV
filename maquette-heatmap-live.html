@@ -240,7 +240,7 @@ function render() {
     tctx.clearRect(0, 0, tmp.width, rows);
     tctx.drawImage(off, 0, 0, vis.length, rows, 0, 0, tmp.width, rows);
     ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
-    if (style === 'filaments') ctx.globalAlpha = .30;
+    if (style === 'filaments') ctx.globalAlpha = .45;
     ctx.drawImage(tmp, 0, 0, tmp.width, rows, left, top, plotW, plotH);
     ctx.globalAlpha = 1;
   }
@@ -248,6 +248,7 @@ function render() {
   if (style === 'filaments') {
     /* FILAMENTS : la base en retrait + les murs en traits laser, le langage de l'app.
        Épaisseur = taille du mur ; la valeur se lit sans effort. */
+    const FIL_T = .32;                                    /* filament dès ~3.5× la normale */
     const cw2 = plotW / vis.length, rh = plotH / rows;
     for (let k = kLo; k <= kHi; k++) {
       const y = top + (kHi - k + .5)*rh;
@@ -255,12 +256,12 @@ function render() {
       for (let i = 0; i <= vis.length; i++) {
         const v = i < vis.length ? (vis[i].bins.get(k) || 0) : 0;
         const q = v > 0 ? qOf(v) : 0;
-        const on = q >= .50;
+        const on = q >= FIL_T;
         if (on && i0 < 0) { i0 = i; qMax = q; }
         else if (on) { if (q > qMax) qMax = q; }
         else if (i0 >= 0) {
           ctx.strokeStyle = rgba(qMax >= .80 ? '#fff8e0' : GOLD_B, .35 + .6*qMax);
-          ctx.lineWidth = 1 + 2.6*(qMax - .5)/.5;
+          ctx.lineWidth = 1 + 2.6*(qMax - FIL_T)/(1 - FIL_T);
           if (qMax >= .80) { ctx.shadowColor = GOLD_B; ctx.shadowBlur = 6; }
           ctx.beginPath(); ctx.moveTo(left + i0*cw2, y); ctx.lineTo(left + i*cw2, y); ctx.stroke();
           ctx.shadowBlur = 0; i0 = -1;
@@ -272,7 +273,7 @@ function render() {
     for (const [k, v] of last.bins) {
       if (k < kLo || k > kHi) continue;
       const q = qOf(v);
-      if (q >= .50) items.push({ y: top + (kHi - k + .5)*rh, p: (k + .5)*binSize, v, q });
+      if (q >= FIL_T) items.push({ y: top + (kHi - k + .5)*rh, p: (k + .5)*binSize, v, q });
     }
     items.sort((a, b) => b.q - a.q); items.length = Math.min(items.length, 8);
     items.sort((a, b) => a.y - b.y);
