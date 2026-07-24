@@ -64,16 +64,20 @@
   <div id="legend">
     <span style="letter-spacing:2px; color:var(--gold)">STYLE :</span>
     <button data-r="filaments" class="on">FILAMENTS</button>
+    <button data-r="lingot">LINGOT</button>
+    <button data-r="braise">BRAISE</button>
+    <button data-r="sillage">SILLAGE</button>
+    <button data-r="cicatrice">CICATRICE</button>
     <button data-r="soie">SOIE</button>
     <button data-r="net">NET</button>
     <button data-r="camps">CAMPS</button>
-    <span>· <b>épaisseur = taille</b> · étiquettes = murs posés maintenant · <b>survolez</b> pour la valeur exacte de chaque point</span>
+    <span>· mêmes données réelles · <b>survolez</b> pour la valeur exacte</span>
   </div>
   <div id="tip"></div>
 
 <script>
 "use strict";
-const BULL = '#3ecfd4', GOLD = '#d9b64d', GOLD_B = '#f0d478';
+const BULL = '#3ecfd4', BEAR = '#ff2d5e', GOLD = '#d9b64d', GOLD_B = '#f0d478';
 const rgba = (hex, a) => { const n = parseInt(hex.slice(1), 16);
   return `rgba(${n>>16&255},${n>>8&255},${n&255},${a})`; };
 const fmtUsd = v => v >= 1e6 ? (v/1e6).toFixed(1)+'M$' : v >= 1e3 ? (v/1e3).toFixed(0)+'k$' : v.toFixed(0)+'$';
@@ -111,6 +115,11 @@ const LUT_BEAR = buildRamp([
   [0.00,  44,  10,  20,   0], [0.10,  54,  12,  24,   0],
   [0.28, 110,  30,  50,  80], [0.55, 255,  45,  94, 160],
   [0.80, 255, 140, 170, 225], [1.00, 255, 234, 240, 255],
+]);
+const LUT_BRAISE = buildRamp([                            /* braise sous la cendre → cœur incandescent */
+  [0.00, 107,  90,  42,   0], [0.16, 107,  90,  42,   0],
+  [0.47, 166, 136,  60,  51], [0.82, 217, 182,  77, 140],
+  [1.00, 240, 212, 120, 191],
 ]);
 
 const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
@@ -213,36 +222,50 @@ function render() {
   const qOf = v => { const r = v/med; return r <= 1 ? 0 : Math.min(1, Math.log(r)/Math.log(48)); };
 
   /* ---- mini-image 1 px/sonde × 1 px/palier (en prod : une seule colonne ajoutée/sonde) ---- */
-  off.width = vis.length; off.height = rows;
-  const img = octx.createImageData(vis.length, rows), px = img.data;
-  const dual = style === 'camps';
-  for (let i = 0; i < vis.length; i++) {
-    const s = vis[i];
-    for (const [k, v] of s.bins) {
-      if (k < kLo || k > kHi) continue;
-      const L = dual ? ((k + .5)*binSize < s.mid ? LUT_BULL : LUT_BEAR) : LUT_OR;
-      const li = Math.min(255, Math.round(qOf(v)*255))*4;
-      const o = ((kHi - k)*vis.length + i)*4;
-      px[o] = L[li]; px[o+1] = L[li+1]; px[o+2] = L[li+2]; px[o+3] = L[li+3];
+  if (style !== 'lingot') {                               /* LINGOT : pas de nappe, le noir reste nu */
+    off.width = vis.length; off.height = rows;
+    const img = octx.createImageData(vis.length, rows), px = img.data;
+    const dual = style === 'camps', braise = style === 'braise';
+    const coolFrom = Math.max(1, vis.length - 96);        /* BRAISE : 4 dernières minutes à pleine chaleur */
+    for (let i = 0; i < vis.length; i++) {
+      const s = vis[i];
+      const cool = braise && i < coolFrom ? .55 + .45*(i/coolFrom) : 1;
+      for (const [k, v] of s.bins) {
+        if (k < kLo || k > kHi) continue;
+        const L = braise ? LUT_BRAISE : dual ? ((k + .5)*binSize < s.mid ? LUT_BULL : LUT_BEAR) : LUT_OR;
+        const li = Math.min(255, Math.round(qOf(v)*cool*255))*4;
+        const o = ((kHi - k)*vis.length + i)*4;
+        px[o] = L[li]; px[o+1] = L[li+1]; px[o+2] = L[li+2]; px[o+3] = L[li+3];
+      }
     }
-  }
-  octx.putImageData(img, 0, 0);
+    octx.putImageData(img, 0, 0);
 
-  if (style === 'net') {
-    /* NET : pixels francs, façon scanline — zéro lissage */
-    ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(off, 0, 0, vis.length, rows, left, top, plotW, plotH);
-  } else {
-    /* SOIE / CAMPS / base FILAMENTS : colonnes franches en X, fondu seulement en Y
-       (étirement en 2 temps : X sans lissage, puis Y avec lissage GPU) */
-    tmp.width = Math.max(1, Math.round(plotW)); tmp.height = rows;
-    tctx.imageSmoothingEnabled = false;
-    tctx.clearRect(0, 0, tmp.width, rows);
-    tctx.drawImage(off, 0, 0, vis.length, rows, 0, 0, tmp.width, rows);
-    ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
-    if (style === 'filaments') ctx.globalAlpha = .45;
-    ctx.drawImage(tmp, 0, 0, tmp.width, rows, left, top, plotW, plotH);
-    ctx.globalAlpha = 1;
+    if (style === 'net' || style === 'sillage') {
+      /* NET : pixels francs — SILLAGE : le même, assourdi, en fond de contexte */
+      ctx.imageSmoothingEnabled = false;
+      if (style === 'sillage') ctx.globalAlpha = .30;
+      ctx.drawImage(off, 0, 0, vis.length, rows, left, top, plotW, plotH);
+      ctx.globalAlpha = 1;
+    } else if (braise) {
+      /* BRAISE : halo lissé + grain net par-dessus (2 drawImage du même buffer) */
+      ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(off, 0, 0, vis.length, rows, left, top, plotW, plotH);
+      ctx.imageSmoothingEnabled = false; ctx.globalAlpha = .30;
+      ctx.drawImage(off, 0, 0, vis.length, rows, left, top, plotW, plotH);
+      ctx.globalAlpha = 1;
+    } else {
+      /* SOIE / CAMPS / base FILAMENTS & CICATRICE : colonnes franches en X, fondu seulement en Y
+         (étirement en 2 temps : X sans lissage, puis Y avec lissage GPU) */
+      tmp.width = Math.max(1, Math.round(plotW)); tmp.height = rows;
+      tctx.imageSmoothingEnabled = false;
+      tctx.clearRect(0, 0, tmp.width, rows);
+      tctx.drawImage(off, 0, 0, vis.length, rows, 0, 0, tmp.width, rows);
+      ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+      if (style === 'filaments') ctx.globalAlpha = .45;
+      if (style === 'cicatrice') ctx.globalAlpha = .40;
+      ctx.drawImage(tmp, 0, 0, tmp.width, rows, left, top, plotW, plotH);
+      ctx.globalAlpha = 1;
+    }
   }
 
   if (style === 'filaments') {
@@ -289,6 +312,130 @@ function render() {
       ctx.fillText(txt, right - 6, y + 3.5);
     }
     ctx.textAlign = 'left';
+  }
+
+  /* « coureurs » : segments temporels continus d'un palier au-dessus d'un seuil = la vie d'un mur */
+  function runsOf(thr, minLen) {
+    const out = [];
+    for (let k = kLo; k <= kHi; k++) {
+      let i0 = -1, qMax = 0, vMax = 0;
+      for (let i = 0; i <= vis.length; i++) {
+        const v = i < vis.length ? (vis[i].bins.get(k) || 0) : 0;
+        const q = v > 0 ? qOf(v) : 0;
+        if (q >= thr) {
+          if (i0 < 0) { i0 = i; qMax = q; vMax = v; }
+          else { if (q > qMax) qMax = q; if (v > vMax) vMax = v; }
+        } else if (i0 >= 0) {
+          if (i - i0 >= minLen) out.push({ k, i0, i1: i, qMax, vMax, live: i === vis.length });
+          i0 = -1;
+        }
+      }
+    }
+    return out;
+  }
+
+  if (style === 'lingot') {
+    /* LINGOT : corps d'ombre massif, chant poli qui accroche la lumière, poinçons de tenue */
+    const cw2 = plotW/vis.length, rh = plotH/rows;
+    for (const r0 of runsOf(.35, 2)) {
+      const q = r0.qMax, y = top + (kHi - r0.k + .5)*rh;
+      const x0 = left + r0.i0*cw2, w = (r0.i1 - r0.i0)*cw2;
+      const h = Math.max(3, Math.min(9, 2 + 6*q));
+      ctx.fillStyle = rgba(GOLD, .05 + .13*q*q);
+      ctx.fillRect(x0, y - h/2, w, h);
+      const edgeA = Math.min(.72, .15 + .45*q + .0008*(r0.i1 - r0.i0));
+      ctx.fillStyle = rgba(GOLD_B, r0.live ? edgeA : edgeA*.45);
+      ctx.fillRect(x0, y - h/2, w, 1);
+      ctx.fillStyle = 'rgba(107,90,42,.35)';
+      ctx.fillRect(x0, y + h/2 - 1, w, 1);
+      if (!r0.live) {                                     /* l'empreinte dans le feutre après retrait */
+        ctx.fillStyle = 'rgba(107,90,42,.10)';
+        ctx.fillRect(x0 + w, y, (vis.length - r0.i1)*cw2, 1);
+      }
+      for (let n = 1, c = r0.i0 + 120; c < r0.i1 && n <= 6; n++, c += 120) {
+        ctx.fillStyle = rgba(GOLD_B, .7);                 /* un poinçon frappé toutes les 5 min tenues */
+        ctx.fillRect(left + c*cw2 - 1, y - h/2 - 3, 2, 2);
+      }
+    }
+  }
+
+  if (style === 'sillage') {
+    /* SILLAGE : l'âge d'un mur = la longueur de son trait ; fuite = cassure + fantôme pointillé */
+    const cw2 = plotW/vis.length, rh = plotH/rows;
+    const rs = runsOf(.32, 4);
+    for (const r0 of rs) r0.camp = (r0.k + .5)*binSize < vis[r0.i0].mid ? BULL : BEAR;
+    rs.sort((a, b) => b.qMax - a.qMax);
+    const kept = {}, sel = [];
+    for (const r0 of rs) { kept[r0.camp] = (kept[r0.camp]||0) + 1; if (kept[r0.camp] <= 10) sel.push(r0); }
+    for (const r0 of sel) {
+      const q = r0.qMax, y = top + (kHi - r0.k + .5)*rh;
+      const x0 = left + r0.i0*cw2, x1 = left + r0.i1*cw2;
+      const h = Math.min(5, Math.round(1 + 3*q));
+      ctx.fillStyle = rgba(r0.camp, .10 + .45*q);
+      ctx.fillRect(x0, y - h/2, x1 - x0, h);
+      if (r0.i1 - r0.i0 >= 240) {                         /* fil dur du mur mûr (>10 min) */
+        ctx.fillStyle = rgba(r0.camp, Math.min(.9, .28 + .45*q));
+        ctx.fillRect(x0, y, x1 - x0, 1);
+      }
+      if (!r0.live) {
+        ctx.fillStyle = rgba(r0.camp, .9);                /* la cassure */
+        ctx.fillRect(x1 - 1, y - h, 1, 2*h);
+        ctx.strokeStyle = rgba(r0.camp, .12); ctx.lineWidth = 1; ctx.setLineDash([2,4]);
+        ctx.beginPath(); ctx.moveTo(x1, y + .5); ctx.lineTo(left + plotW, y + .5); ctx.stroke();
+        ctx.setLineDash([]);
+      }
+    }
+  }
+
+  if (style === 'cicatrice') {
+    /* CICATRICE : naissances jalonnées, fuites gravées (contour barré + heure) sur fond assourdi */
+    const cw2 = plotW/vis.length, rh = plotH/rows;
+    const evs = runsOf(.35, 24);
+    for (const r0 of evs) r0.camp = (r0.k + .5)*binSize < vis[r0.i0].mid ? BULL : BEAR;
+    evs.sort((a, b) => (b.live - a.live) || (b.i1 - a.i1) || (b.qMax - a.qMax));
+    evs.length = Math.min(evs.length, 24);
+    let labels = 0;
+    ctx.font = '9px Consolas, monospace';
+    for (const r0 of evs) {
+      const q = r0.qMax, y = top + (kHi - r0.k + .5)*rh;
+      const x0 = left + r0.i0*cw2, x1 = left + r0.i1*cw2;
+      if (r0.live) {
+        ctx.fillStyle = rgba(r0.camp, .8);                /* chevron de naissance */
+        ctx.beginPath(); ctx.moveTo(x0, y - 3); ctx.lineTo(x0 + 4, y); ctx.lineTo(x0, y + 3);
+        ctx.closePath(); ctx.fill();
+        ctx.fillStyle = rgba(r0.camp, .30);               /* trait de vie */
+        ctx.fillRect(x0, y, left + plotW - x0, 1);
+        for (let n = 1, c = r0.i0 + 120; c < vis.length && n <= 12; n++, c += 120) {
+          ctx.fillStyle = rgba(r0.camp, .5);              /* une encoche par 5 min tenues */
+          ctx.fillRect(left + c*cw2, y + 2, 1, 2);
+        }
+      } else {
+        const h = Math.max(3, Math.min(9, 2 + 6*q));
+        ctx.strokeStyle = rgba(r0.camp, .35); ctx.lineWidth = 1;
+        ctx.strokeRect(x0, y - h/2, x1 - x0, h);
+        ctx.strokeStyle = 'rgba(255,45,94,.6)';           /* la balafre */
+        ctx.beginPath(); ctx.moveTo(x0, y + h/2); ctx.lineTo(x1, y - h/2); ctx.stroke();
+        if (labels < 10) {
+          labels++;
+          const d = new Date(vis[Math.max(0, r0.i1 - 1)].t);
+          ctx.fillStyle = rgba(GOLD_B, .6);
+          ctx.fillText(`${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`, x1 + 3, y + 3);
+        }
+      }
+    }
+  }
+
+  if (style === 'braise') {
+    /* BRAISE : l'étincelle du présent — pastilles des ≤4 murs les plus chauds, bord droit */
+    const rh = plotH/rows, lastS = vis[vis.length - 1];
+    const hot = [...lastS.bins].map(([k, v]) => [k, qOf(v)])
+      .filter(x => x[1] >= .6 && x[0] >= kLo && x[0] <= kHi)
+      .sort((a, b) => b[1] - a[1]).slice(0, 4);
+    for (const [k, q] of hot) {
+      const y = top + (kHi - k + .5)*rh;
+      ctx.fillStyle = rgba(GOLD_B, .25);
+      ctx.beginPath(); ctx.arc(left + plotW - 5, y, 4 + 3*q, 0, Math.PI*2); ctx.fill();
+    }
   }
 
   /* échelle de prix réelle */
