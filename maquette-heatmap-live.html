@@ -59,7 +59,7 @@
   <div id="legend">
     <button id="mH2" class="on">H2 · MURS SEULS</button>
     <button id="mH1">H1 · RASTER COMPLET</button>
-    <span><b>chaque cellule = liquidité réellement posée</b> (fapi.binance.com, 500 niveaux/côté, sonde 2.5 s) · la page se remplit en vivant</span>
+    <span><b>chaque cellule = liquidité réellement posée</b> (fapi.binance.com, 500 niveaux/côté ≈ ±0.1 % autour du prix, sonde 2.5 s) · la page se remplit en vivant</span>
   </div>
 
 <script>
@@ -97,10 +97,11 @@ async function poll() {
     const d = await r.json();
     if (!d.bids?.length || !d.asks?.length) throw new Error('vide');
     const mid = (+d.bids[0][0] + +d.asks[0][0]) / 2;
-    if (!binSize) {                                       /* pas de bin : ~0.025 % du prix, arrondi propre */
-      const raw = mid * 2.5e-4, e = Math.pow(10, Math.floor(Math.log10(raw))), m = raw/e;
+    if (!binSize) {                                       /* pas de bin : la portée réelle des 500 niveaux / ~70 */
+      const span = Math.max(mid*1e-4, +d.asks[d.asks.length-1][0] - +d.bids[d.bids.length-1][0]);
+      const raw = span / 70, e = Math.pow(10, Math.floor(Math.log10(raw))), m = raw/e;
       binSize = e * (m < 1.5 ? 1 : m < 3.5 ? 2 : m < 7.5 ? 5 : 10);
-      priceDec = binSize < 1 ? 2 : binSize < 10 ? 1 : 0;
+      priceDec = binSize < .1 ? 3 : binSize < 1 ? 2 : binSize < 10 ? 1 : 0;
     }
     const bins = new Map();                               /* USD réellement posés par palier de prix */
     for (const [p, q] of d.bids) { const k = Math.floor(+p/binSize); bins.set(k, (bins.get(k)||0) + (+p)*(+q)); }
@@ -156,25 +157,25 @@ function render() {
   const vis = samples.slice(-Math.min(samples.length, 720));
   const cw = plotW / vis.length;
 
-  /* fenêtre de prix : les mids visibles ± 45 pas */
-  let mLo = Infinity, mHi = -Infinity;
-  for (const s of vis) { if (s.mid < mLo) mLo = s.mid; if (s.mid > mHi) mHi = s.mid; }
-  const pLo = mLo - 45*binSize, pHi = mHi + 45*binSize;
+  /* fenêtre de prix : l'étendue RÉELLE du carnet visible sur la période */
+  let kLo = Infinity, kHi = -Infinity, max = 0;
+  for (const s of vis) for (const k of s.bins.keys()) { if (k < kLo) kLo = k; if (k > kHi) kHi = k; }
+  kLo -= 2; kHi += 2;
+  const pLo = kLo*binSize, pHi = (kHi + 1)*binSize;
   const Y = p => top + (pHi - p)/(pHi - pLo)*plotH;
   const ch = Math.max(1, plotH*binSize/(pHi - pLo));
-  const kLo = Math.floor(pLo/binSize), kHi = Math.ceil(pHi/binSize);
 
-  /* normalisation sur le max VISIBLE — l'alpha module, jamais la teinte */
-  let max = 0;
-  for (const s of vis) for (const [k, v] of s.bins) if (k >= kLo && k <= kHi && v > max) max = v;
+  /* normalisation log sur le max VISIBLE (un méga-mur n'éteint pas le reste) —
+     l'alpha module, jamais la teinte */
+  for (const s of vis) for (const v of s.bins.values()) if (v > max) max = v;
   if (!max) return;
-  const thr = mode === 'H2' ? .30 : .04;
+  const thr = mode === 'H2' ? .38 : .07;
 
   for (let i = 0; i < vis.length; i++) {
     const s = vis[i], x = left + i*cw;
     for (const [k, v] of s.bins) {
       if (k < kLo || k > kHi) continue;
-      const q = v/max;
+      const q = Math.pow(v/max, .35);
       if (q < thr) continue;
       if (q >= .70)      ctx.fillStyle = rgba(GOLD_B, .25 + .45*q);
       else if (q >= .30) ctx.fillStyle = rgba(GOLD,   .12 + .34*q);
