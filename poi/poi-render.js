@@ -381,13 +381,14 @@
               // PRIORITE a celles qui intersectent la ligne (extreme parmi
               // elles) ; repli : extreme brut (comportement precedent).
               const eB = poi.entry ?? poi.entryPrice ?? (poi.direction === "long" ? poi.zoneHigh : poi.zoneLow);
+              const epsB = (Number.isFinite(eB) ? Math.abs(eB) : 1) * 1e-9;   // meme epsilon IEEE754 que la fin
               let lo = 0, hi = A.length - 1;
               while (hi - lo > 1) { const m = (lo + hi) >> 1; if (A[m].time < f0) lo = m; else hi = m; }
               let bestV = null, bestTouchV = null, vTouch = null;
               for (let i = lo; i < A.length && A[i].time < to; i++) {
                 const b = A[i];
                 if (b.time + s <= from) continue;
-                const touches = eB != null && b.low <= eB && b.high >= eB;
+                const touches = eB != null && b.low <= eB + epsB && b.high >= eB - epsB;
                 if (poi.direction === "short") {
                   if (bestV == null || b.high > bestV) { bestV = b.high; v = b.time; }
                   if (touches && (bestTouchV == null || b.high > bestTouchV)) { bestTouchV = b.high; vTouch = b.time; }
@@ -409,6 +410,12 @@
             const zsLo = poi.zoneLow, zsHi = poi.zoneHigh;                                 // zone PURE
             const zLo = Math.min(zsLo, poi.clusterLow ?? zsLo);                            // enveloppe
             const zHi = Math.max(zsHi, poi.clusterHigh ?? zsHi);                           //  ∪ cluster
+            // EPSILON flottant (mesure en reel TIA 3s, 2026-07-24) : les prix
+            // d'archive portent du bruit IEEE754 (entry 0.34790000000000004 vs
+            // high de bougie 0.3479 EXACT) — une touche au tick pres echouait
+            // pour 4e-17. Tolerance relative 1e-9 : des millions de fois sous
+            // le tick le plus fin, aucun faux positif possible.
+            const eps = (Number.isFinite(e) ? Math.abs(e) : Math.abs(zsHi) || 1) * 1e-9;
             const seek = (from, to, mode, first) => {   // bougie qui touche, 1re (first) ou la PLUS PROCHE de tSec
               const f0 = from - s;   // attrape la chevauchante
               // GATE de couverture GAUCHE (alignement 2026-07-24) : plage
@@ -422,9 +429,9 @@
               for (let i = lo; i < A.length && A[i].time < to; i++) {
                 const b = A[i];
                 if (b.time + s <= from) continue;   // finit avant la fenetre : vraiment exclue
-                const hit = mode === "line" ? (e != null && b.low <= e && b.high >= e)
-                  : mode === "zoneStrict" ? (b.low <= zsHi && b.high >= zsLo)
-                  : (b.low <= zHi && b.high >= zLo);
+                const hit = mode === "line" ? (e != null && b.low <= e + eps && b.high >= e - eps)
+                  : mode === "zoneStrict" ? (b.low <= zsHi + eps && b.high >= zsLo - eps)
+                  : (b.low <= zHi + eps && b.high >= zLo - eps);
                 if (!hit) continue;
                 if (first) return b.time;
                 const d = Math.abs(b.time - tSec);
