@@ -1121,6 +1121,73 @@ async function bridgeSec(seq, plan) {
   }
   } finally { secBridgeLive = null; }   // budget épuisé ou sortie : le scroll-back reprend son régime normal
 }
+/* ---- archives de bougies SECONDES pré-construites (zéro chargement, volet 2) ----
+   Le pipeline quotidien publie poi/sec/<SYM>/3s-<jour>.json (seaux 3 s des N
+   derniers jours UTC révolus, immuables) + poi/sec/index.json. Quand le
+   scroll-back atteint un jour archivé CONTIGU, le jour entier arrive en UN
+   fetch statique (CDN Pages, zéro poids Binance) — le REST ne sert plus qu'à
+   ponter d'aujourd'hui vers le jour archivé le plus récent. */
+let secArchIdx = null, secArchIdxAt = 0;
+async function secArchDays() {
+  if (Date.now() - secArchIdxAt > 30 * 60e3) {
+    secArchIdxAt = Date.now();   // posé AVANT le fetch : un échec ne retente que dans 30 min
+    try {
+      const r = await fetch('poi/sec/index.json', { cache: 'no-store' });
+      secArchIdx = r.ok ? await r.json() : null;
+    } catch { secArchIdx = null; }
+  }
+  return (secArchIdx && secArchIdx.days && secArchIdx.days[symbol]) || [];
+}
+/* undefined = pas applicable (pas d'archive contiguë) → pagination REST ;
+   null = réessayer plus tard ; sinon bougies du jour archivé, roll-up au TF
+   courant (3 | 15 | 30 | 45 divisent 86400 : aucun seau à cheval sur minuit) */
+async function fetchOlderSecArch() {
+  const seq = loadSeq;
+  const days = await secArchDays();
+  if (seq !== loadSeq || !ctxFresh()) return null;
+  if (!days.length || !candles.length) return undefined;
+  const headT = candles[0].time;
+  let cand = null;   // jour archivé le plus récent contenant la tête (ou fini pile à la tête)
+  for (const d of days) {
+    const d0 = Date.parse(d + 'T00:00:00Z') / 1000;
+    if (Number.isFinite(d0) && d0 < headT && headT <= d0 + 86400) cand = { d, d0 };
+  }
+  if (!cand) return undefined;   // pas contigu (le pont vers l'archive reste à faire) : REST
+  let j = null;
+  try {
+    const r = await fetch(`poi/sec/${symbol}/3s-${cand.d}.json`);   // immuable : cache HTTP/SW efficace
+    if (r.ok) j = await r.json();
+  } catch {}
+  if (seq !== loadSeq || !ctxFresh()) return null;
+  if (!j || !Array.isArray(j.bars) || !j.bars.length) return undefined;   // index en avance sur le fichier : REST
+  const out = [];   // roll-up 3 s -> TF courant sur la grille du chart (bucketStart)
+  for (const b of j.bars) {
+    const bt = bucketStart(b[0]);
+    const last = out[out.length - 1];
+    if (last && last.time === bt) {
+      if (b[2] > last.high) last.high = b[2];
+      if (b[3] < last.low) last.low = b[3];
+      last.close = b[4]; last.volume += b[5];
+    } else out.push({ time: bt, open: b[1], high: b[2], low: b[3], close: b[4], volume: b[5] });
+  }
+  // Tête de candles possiblement PARTIELLE (coupe de page REST) : si son seau
+  // appartient au jour archivé, l'archive détient la version COMPLÈTE — elle
+  // fait autorité, la tête partielle est remplacée (jamais fusionnée : sommer
+  // un sous-ensemble avec le tout double-compterait le volume).
+  let bars;
+  const full = out.find(b => b.time === headT);
+  if (full && headT < cand.d0 + 86400 && candles.length > 1) {
+    candles = candles.slice(1);
+    bars = out.filter(b => b.time <= headT);
+  } else {
+    bars = out.filter(b => b.time < headT);
+  }
+  if (!bars.length) return undefined;
+  // Le curseur REST arrière ne décrit plus la nouvelle tête : re-seed PAR
+  // TEMPS quand le REST reprendra (archives épuisées) — mécanique du volet 1.
+  firstTradeId = null;
+  return bars;
+}
 /* scroll-back des TF secondes : 10 pages de trades en arrière par déclenchement
    (fluidité 2026-07-24 : 5 pages = 15-50 s de BTC par aller-retour — 2× moins
    d'allers-retours ET 2× moins de setData par bougie obtenue à poids constant).
@@ -2932,8 +2999,9 @@ async function loadOlder() {
   loadingOld = true;
   try {
     let older;
-    if (isSecTf()) {                             // secondes : pagination arrière des trades, à la demande du scroll
-      older = await fetchOlderSec();
+    if (isSecTf()) {                             // secondes : jour archivé contigu d'abord (zéro poids), sinon REST
+      older = await fetchOlderSecArch();
+      if (older === undefined) older = await fetchOlderSec();
       if (replay) return;
       if (older === OLDEST) { oldestDone = true; return; }
       // erreur/contexte : pause courte AVANT re-tentative — l'enchaînement

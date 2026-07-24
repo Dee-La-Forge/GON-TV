@@ -21,6 +21,10 @@ for %%S in (%SYMBOLS%) do (
 rem verdicts de la regle de retest (BTC seulement : pourcentages calibres BTC)
 call :step "outcome BTCUSDT" node backfill-outcome.js BTCUSDT
 
+rem archives de bougies SECONDES (28 symboles, 7 jours glissants) : navigation
+rem profonde des TF secondes sans un seul poids Binance cote client
+call :step "sec-bars ALL" node gen-sec-archive.js ALL 7
+
 echo [%date% %time%] ===== fin (worst=%WORST%) ===== >> "%LOG%"
 exit /b %WORST%
 
